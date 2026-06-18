@@ -1,0 +1,28 @@
+site_name: DeepFaune Documentation
+site_url: https://deepfaune.pages.math.cnrs.fr/
+site_description: "A collaborative project combining millions of images and artificial intelligence to develop a tool for the automatic recognition of the European fauna in camera-trap images"
+docs_dir: docs
+site_dir: site
+repo_url: https://plmlab.math.cnrs.fr/deepfaune/software
+repo_name: deepfaune/software
+
+theme:
+  name: material
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal # https://squidfunk.github.io/mkdocs-material/setup/changing-the-colors/#color-scheme
+      accent: cyan # https://squidfunk.github.io/mkdocs-material/setup/changing-the-colors/#accent-color
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode

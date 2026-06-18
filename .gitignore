@@ -1,0 +1,28 @@
+# model weights (large; never commit)
+*.pt
+*.pth
+*.onnx
+
+# archives and data
+*.tar.gz
+*.zip
+
+# python noise
+__pycache__/
+*.pyc
+*.pyo
+
+# runtime outputs and logs
+*.log
+df_out/
+outputs/
+
+# local config holding the IP / port 48889 / paths
+config.local.*
+.env
+
+# virtual environments, if created inside the folder
+.venv/
+venv/
+env/
+envdeepfaune/

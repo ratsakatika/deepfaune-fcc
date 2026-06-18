@@ -1,0 +1,167 @@
+2025-11-07  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 1.4.1
+	    * Bug fixed about bird classification in video mode.
+
+2025-10-17  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 1.4.0
+	    
+	    * New categories 'golden jackal', 'raccoon dog', 'porcupine' and 'muskrat'  (in french 'chacal doré', 'chien viverrin', 'porcepic' and 'rat musqué').
+	    * Bird classification into 'anseriform', 'otherbird', 'columbiform', 'corvid', 'galliform', 'passerine', 'piciform', 'raptor' is now possible (optional).
+	    * Improved detection using our yolov8s and MegaDetector v1000-sorrel (courtesy of Dan Morris) at resolution 960
+	    in backstop (fast) or ensemble (slower) mode, or using MegaDetector v1000-redwood at resolution 1280 (slow, GPU recommended).
+	    * Radio button to select the device auto/cpu/gpu.
+	    * Forbidden species are now stored from one run to the next.
+	    * Spanish translations available.
+
+
+2025-02-25  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 1.3.0
+	    * New categories 'bison', 'moose', 'rein deer' and 'wolverine'  (in french 'bison', 'elan', 'renne' and 'glouton').
+	    * Even more efficient classification model, still based on vit_large_patch14_dinov2 architecture.
+	    * New possibility to choose between our yolov8s at resolution 960 for detection and MegaDetector (Microsoft) yolov10x at resolution 640.
+	    * Use of more icons instead of text in software design.
+	    * Animal counts and human counts are managed independently, and displayed in the interface.
+	    * Column 'HumanPresence' replaced by 'HumanCount'.
+	    * Spanish translations available.
+
+2024-10-02  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 1.2.0
+	    * New categories 'beaver','fallow deer', 'otter' and 'raccoon'  (in french 'castor', 'daim', 'loutre' and 'raton laveur').
+	    * More efficient classification model, still based on vit_large_patch14_dinov2 architecture.
+	    * Light modernization of the software design.
+	    * New column 'Top1' (predicted class, even below  the threshold) is now in csv/xslx export.
+	    * Videos and sequences can be played.
+	    * Metadata can be displayed in a separate windows.
+	    * Brightness can be changed.
+	    * On Windows, images can be opened in explorer
+
+2024-01-12  Vincent Miele  <vincent.miele@univ-lyon1.fr>
+
+	    Version 1.1.0
+	    * Moving to vit_large_patch14_dinov2 architecture for classification, with large number of parameters but improved performance.
+	    * Moving to resolution 960 in yolov8s architecture for detection, with improved performance.
+	    * New confidence scores with better calibration, using average logit method and temperature scaling. 
+	    * Playing video is now possible, with a double-click on the video frame in the graphical interface.
+	    * Human blurring is now available, for images only.
+	    * Human presence is now recorded in CSV/XLSX files, for both images and videos.
+	    * Date/time is now handled for MOV/MP4/MKV video files. 
+
+2023-06-19  Vincent Miele  <vincent.miele@univ-lyon1.fr>
+
+	    Version 1.0.1
+	    * The main window can be resized, solving a problem occuring on Windows.
+	    * Bug fix: GUI is now fully thread-safe.
+
+2023-05-15  Vincent Miele  <vincent.miele@univ-lyon1.fr>
+
+	    Version 1.0.0
+	    * Major changes in GUI features and design.
+	    * French/english/italian/german translations available.
+	    * Models from version 0.6.0 are still used.
+	    * Box count available as an option (experimental).
+	    * API changes with no reverse compatibility with previous versions.
+
+2023-03-23  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 0.6.0
+	    * New categories 'genet', 'goat', 'hedgehog' and 'nutria' (in french 'genette', 'chevre', 'herisson' and 'ragondin').
+	    * Moving to convnext_base_in22k architecture for classification, with improved performance.
+	    Model weights are now in 'deepfaune-convnextbasein22k.pt' (large file).
+	    * Moving to yolov8s architecture for detection, with improved performance.
+	    Model weights are now in 'deepfaune-yolov8s.pt'.
+	    
+
+2023-02-16  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 0.5.3
+	    * New multiline view in results table for videos.
+	    * Bug fix: progress bar is reinitialized when loading a new folder.
+	    * Bug fix: correct handling of empty/null images.
+
+2023-01-18  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 0.5.2
+	    * Improved confidence score for videos, leading to less videos classified as "undefined".
+	    A frame rate of 3 fps is now used, using a total of 12 frames.
+	    * A box is now drawn on each non empty image to show which part of the image has been used for classification.
+	    For videos, the box is drawn on the most informative frame.
+	    * New default threshold to 0.8
+	    * New testdata/ content with images for a quick software trial.
+
+2022-11-12  Gaspard Dussert  <gaspard.dussert@cnrs.fr>
+
+	    Version 0.5.1
+	    * Bug fix: The software do not crash when no folder is selected to save in a CSV/XLSX file.
+	    * Bug fix: Overwriting of files with the same name is now prevented when they are copied/moved.
+	    Filenames are now changed with an additionnal "_1,_2,..." tag if necessary.
+
+2022-10-18  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 0.5.0
+	    * New categories 'bear' and 'equide' (in french 'ours' and 'equide').
+	    * Moving from TensorFlow to PyTorch for classification.
+	    Model weights are now in 'deepfaune-efficientnetv2s.pt' file.
+	    * Detection is now x3 faster.
+	    Moving from yolov4 to yolov5m6 for detection.
+	    Model weights are now in 'deepfaune-yolov5.pt' file.
+	    * Issue about confounding human/dog/vehicle categories is solved.
+	    * Users can choose the folder to save csv/xlsx files.
+	    * It is possible to select a subset of categories/species to keep for prediction.
+
+2022-09-01  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 0.4.1
+	    * New GUI shape with tabs.
+	    * Date/time are now saved in csv/xslx files.
+
+2022-07-06  Vincent Miele  <vincent.miele@cnrs.fr>
+    
+	    Version 0.4.0
+	    * New detector weights, with a more restrictive threshold to enhance empty detection.
+	    * Modified API with better encapsulation.
+	    * New class PredictorJSON to hanlde JSON results from MegaDetector.
+	    * Directory demo/ now contains example of API use.
+
+2022-05-23  Vincent Miele  <vincent.miele@cnrs.fr>
+	    
+	    Version 0.3.1
+	    * Video are now accepted and transformed into sequences of 8 images for the first 8 seconds.
+
+2022-05-16  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 0.3.0
+	    * Now relying on openCV.
+	    * Detection improved using openCV : 2x faster, less false negative.
+	    Model weights are in 'deepfaune-yolov4.weights' file instead of 'checkpoints' folder.
+	    * New heuristic to detect sequences of identical images.
+	    * Fully modular code, with available API.
+	    
+2022-03-28  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 0.2.1
+	    * Bug fix: threshold button is now working correctly.
+	    * Bug fix: autocorrect by folder is now also working when using Windows 11 and Python 3.10.
+	    * File ordering is now optimal for vizualization: by folder, then
+	    by alphabetical order.
+
+2022-03-18  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Version 0.2
+	    * New categories 'cat','lynx' and 'marmot' (in french 'chat', 'lynx' and 'marmotte').
+	    * The autocorrection with exif now operates by sudirectories,
+	    to prevent considering sequences of images that are from different camera traps.
+	    * The principal windows is now desactivated when using the visualization window.
+	    * Version working on Linux/Windows, and now on Mac OSX
+	   
+2022-02-14  Vincent Miele  <vincent.miele@cnrs.fr>
+
+	    Pre-release version O.1
+	    * Includes categories 'badger','ibex','red deer','chamois','cat','roe deer','dog','squirrel',
+	    'human','lagomorph', 'wolf','lynx','marmot','micromammal','mouflon','sheep','mustelide',
+	    'bird','fox','wild boar', 'cow','vehicle' (in french 'blaireau', 'bouquetin', 'cerf',
+	    'chamois', 'chevreuil', 'chien', 'ecureuil', 'felinae', 'humain', 'lagomorphe', 'loup', 'micromammifere',
+	    'mouflon', 'mouton', 'mustelide', 'oiseau', 'renard', 'sanglier', 'vache', 'vehicule').

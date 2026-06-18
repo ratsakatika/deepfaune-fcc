@@ -13,24 +13,32 @@
 #     a time) and preserves EXIF burst sequences (a deployment's burst lives in
 #     one folder; grouping across folders would corrupt sequence aggregation).
 #   - The 1.2 GB classifier is built once and reused for every shard.
-#   - Outputs (CSVs and the log) go to local disk only; the source archive is
+#   - The per-shard CSVs are the source of truth. The optional master CSV is only
+#     ever a derived snapshot, regenerated (never appended) from the shard CSVs.
+#   - Outputs (CSVs, logs, metadata) go to local disk only; the source archive is
 #     read-only and must never be written to.
-#   - CPU only: device is forced to "cpu" and no CUDA path is ever taken.
+#   - CPU only: CUDA is disabled by setting CUDA_VISIBLE_DEVICES="" before torch
+#     is imported, and the engine is additionally asked for device="cpu".
 #
 # Only the standard library is imported at module load. torch and the DeepFaune
-# engine are imported lazily inside run(), so --dry-run and the unit tests stay
-# cheap and never need the model weights.
+# engine are imported lazily inside run(), so --dry-run, --merge and the unit
+# tests stay cheap and never need torch or the model weights.
 
 import argparse
 import csv
+import glob
 import hashlib
+import json
 import logging
 import os
 import re
 import signal
+import socket
+import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 LOG = logging.getLogger("deepfaune_batch")
@@ -158,6 +166,21 @@ def plan_shards(shards, out_dir, root, rescan):
     return plan
 
 
+def is_within(child, parent):
+    """True if child equals parent or sits inside it.
+
+    Uses commonpath rather than a string prefix so edge cases such as parent
+    being the filesystem root ("/") do not misfire (root + os.sep would be "//").
+    """
+    child = os.path.abspath(child)
+    parent = os.path.abspath(parent)
+    try:
+        return os.path.commonpath([child, parent]) == parent
+    except ValueError:
+        # Raised when the paths cannot be compared (different drives on Windows).
+        return False
+
+
 def atomic_write_csv(path, header, rows):
     """Write a CSV to a temp file in the same directory, then atomically rename.
 
@@ -185,6 +208,66 @@ def atomic_write_csv(path, header, rows):
         except OSError:
             pass
         raise
+
+
+def iter_shard_csvs(out_dir, exclude=()):
+    """Yield the per-shard CSV paths in out_dir, sorted.
+
+    Globs exactly "*.csv" so the ".tmp" temp files and the JSON metadata sidecar
+    are ignored. Paths in exclude (such as the master itself) are skipped, so
+    regenerating the master never reads its own output.
+    """
+    exclude_abs = {os.path.abspath(p) for p in exclude}
+    for path in sorted(glob.glob(os.path.join(out_dir, "*.csv"))):
+        if os.path.abspath(path) in exclude_abs:
+            continue
+        yield path
+
+
+def merge_csvs(out_dir, merge_out, header=CSV_HEADER):
+    """Stream-concatenate the per-shard CSVs in out_dir into merge_out.
+
+    The header is written once; each source file's own header row is dropped and
+    its data rows are copied through csv.writer so quoting stays correct. Files
+    are streamed, not loaded whole. The write is atomic (temp then rename) and
+    merge_out is excluded from the inputs, so this is an idempotent rebuild that
+    never appends. Returns (n_files, n_rows).
+    """
+    out_dir = os.path.abspath(out_dir)
+    merge_out = os.path.abspath(merge_out)
+    directory = os.path.dirname(merge_out) or "."
+    os.makedirs(directory, exist_ok=True)
+    sources = list(iter_shard_csvs(out_dir, exclude=[merge_out]))
+    fd, tmp = tempfile.mkstemp(
+        dir=directory, prefix=os.path.basename(merge_out) + ".", suffix=".tmp"
+    )
+    n_files = 0
+    n_rows = 0
+    try:
+        with os.fdopen(fd, "w", newline="", encoding="utf-8") as out:
+            writer = csv.writer(out)
+            writer.writerow(header)
+            for src in sources:
+                with open(src, newline="", encoding="utf-8") as handle:
+                    reader = csv.reader(handle)
+                    try:
+                        next(reader)  # drop this file's header row
+                    except StopIteration:
+                        continue  # empty file
+                    n_files += 1
+                    for row in reader:
+                        writer.writerow(row)
+                        n_rows += 1
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(tmp, merge_out)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return n_files, n_rows
 
 
 def format_duration(seconds):
@@ -235,6 +318,96 @@ class Stopper:
             "(current shard is abandoned and redone on resume)",
             signum,
         )
+
+
+####################################################################################
+### PROVENANCE (stdlib only; records what produced the outputs)
+####################################################################################
+def read_deepfaune_version(software_dir):
+    """Best-effort DeepFaune version string from ChangeLog.txt, or None."""
+    path = os.path.join(software_dir, "ChangeLog.txt")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                match = re.search(r"Version\s+([0-9][0-9A-Za-z.\-]*)", line)
+                if match:
+                    return match.group(1)
+    except OSError:
+        return None
+    return None
+
+
+def collect_weight_info(software_dir):
+    """Map each weight filename (*.pt) in software_dir to its size in bytes."""
+    info = {}
+    for path in sorted(glob.glob(os.path.join(software_dir, "*.pt"))):
+        try:
+            info[os.path.basename(path)] = os.path.getsize(path)
+        except OSError:
+            info[os.path.basename(path)] = None
+    return info
+
+
+def get_git_commit():
+    """This orchestrator's own git commit, or None if not available."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        result = subprocess.run(
+            ["git", "-C", here, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def build_run_metadata(out_dir, software_dir, root, args):
+    """Assemble the provenance dictionary written at the start of a run."""
+    return {
+        "detector": args.detector,
+        "threshold": args.threshold,
+        "maxlag": args.maxlag,
+        "birds": args.birds,
+        "lang": args.lang,
+        "batch_size": args.batch_size,
+        "deepfaune_version": read_deepfaune_version(software_dir),
+        "weights": collect_weight_info(software_dir),
+        "root": root,
+        "out_dir": out_dir,
+        "hostname": socket.gethostname(),
+        "utc_start_time": datetime.now(timezone.utc).isoformat(),
+        "orchestrator_git_commit": get_git_commit(),
+        "partition": args.partition,
+        "num_partitions": args.num_partitions,
+    }
+
+
+def write_run_metadata(out_dir, software_dir, root, args):
+    """Write run_metadata.p<partition>.json atomically (one file per partition).
+
+    Returns (path, metadata).
+    """
+    metadata = build_run_metadata(out_dir, software_dir, root, args)
+    path = os.path.join(out_dir, f"run_metadata.p{args.partition}.json")
+    directory = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(
+        dir=directory, prefix=os.path.basename(path) + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(metadata, handle, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return path, metadata
 
 
 ####################################################################################
@@ -344,7 +517,7 @@ def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
     predictor.resetBatch()
     last_hb = time.monotonic()
     while True:
-        batch, k1, k2, k1seq, k2seq = predictor.nextBatch()
+        _batch, k1, k2, _k1seq, _k2seq = predictor.nextBatch()
         if k1 >= total:  # sentinel return: every batch has been processed
             break
         if stopper.stop:
@@ -382,10 +555,14 @@ def setup_logging(out_dir, partition):
 
 
 def validate_common(args):
-    """Validate the arguments shared by run and dry-run. Returns an error string
-    or None."""
-    if not os.path.isdir(args.root):
-        return f"root is not a directory: {args.root}"
+    """Validate the numeric arguments present in every mode.
+
+    Returns an error string or None. The critical check is --batch-size: a value
+    of 0 leaves the engine's batch pointers with k1 == k2, so process_shard never
+    reaches its sentinel and the run hangs; a negative value crashes at tensor
+    allocation. Path checks (root, software-dir) are mode-specific and done in
+    the respective entry points.
+    """
     if args.num_partitions < 1:
         return f"--num-partitions must be >= 1 (got {args.num_partitions})"
     if args.partition < 0 or args.partition >= args.num_partitions:
@@ -393,6 +570,18 @@ def validate_common(args):
             f"--partition must be in [0, {args.num_partitions}) "
             f"(got {args.partition})"
         )
+    if args.batch_size < 1:
+        return f"--batch-size must be >= 1 (got {args.batch_size})"
+    if args.maxlag < 0:
+        return f"--maxlag must be >= 0 (got {args.maxlag})"
+    if not 0 < args.threshold <= 1:
+        return f"--threshold must satisfy 0 < t <= 1 (got {args.threshold})"
+    if args.heartbeat_secs < 0:
+        return f"--heartbeat-secs must be >= 0 (got {args.heartbeat_secs})"
+    if args.merge_every < 0:
+        return f"--merge-every must be >= 0 (got {args.merge_every})"
+    if args.max_images is not None and args.max_images < 1:
+        return f"--max-images must be >= 1 if given (got {args.max_images})"
     return None
 
 
@@ -406,7 +595,13 @@ def dry_run(args):
     if err:
         print(f"error: {err}", file=sys.stderr)
         return 2
+    if not args.root:
+        print("error: --root is required for --dry-run", file=sys.stderr)
+        return 2
     root = os.path.abspath(args.root)
+    if not os.path.isdir(root):
+        print(f"error: root is not a directory: {root}", file=sys.stderr)
+        return 2
     shards = find_shards(root)
     total_images = sum(len(imgs) for _, imgs in shards)
     print(f"Dry run (no models loaded, torch not imported)")
@@ -431,30 +626,69 @@ def dry_run(args):
     return 0
 
 
+def merge_mode(args):
+    """Standalone master rebuild: concatenate the per-shard CSVs, then exit.
+
+    Like --dry-run, this imports nothing heavy (no torch, no models). The master
+    is always rebuilt from scratch, so it stays a faithful snapshot of whatever
+    shard CSVs currently exist in --out-dir.
+    """
+    err = validate_common(args)
+    if err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
+    out_dir = os.path.abspath(args.out_dir)
+    if not os.path.isdir(out_dir):
+        print(f"error: out-dir is not a directory: {out_dir}", file=sys.stderr)
+        return 2
+    merge_out = (
+        os.path.abspath(args.merge_out)
+        if args.merge_out
+        else os.path.join(out_dir, "master.csv")
+    )
+    n_files, n_rows = merge_csvs(out_dir, merge_out)
+    print(f"Merged {n_files} shard CSVs ({n_rows} rows) -> {merge_out}")
+    return 0
+
+
 def run(args):
     """Execute the batch: enumerate, skip finished shards, classify the rest."""
     err = validate_common(args)
     if err:
         print(f"error: {err}", file=sys.stderr)
         return 2
+    if not args.root:
+        print("error: --root is required for a run", file=sys.stderr)
+        return 2
+    if not args.software_dir:
+        print("error: --software-dir is required for a run", file=sys.stderr)
+        return 2
     root = os.path.abspath(args.root)
     out_dir = os.path.abspath(args.out_dir)
     software_dir = os.path.abspath(args.software_dir)
 
-    # Refuse to write next to the (read-only) source archive.
-    if out_dir == root or out_dir.startswith(root + os.sep):
+    if not os.path.isdir(root):
+        print(f"error: root is not a directory: {root}", file=sys.stderr)
+        return 2
+    if not os.path.isdir(software_dir):
+        print(f"error: --software-dir not found: {software_dir}", file=sys.stderr)
+        return 2
+    # Refuse to write next to the (read-only) source archive. commonpath handles
+    # edge cases (such as root being "/") that a string prefix check would not.
+    if is_within(out_dir, root):
         print(
             f"error: refusing to write outputs inside the source tree "
             f"(out-dir={out_dir} is under root={root})",
             file=sys.stderr,
         )
         return 2
-    if not os.path.isdir(software_dir):
-        print(f"error: --software-dir not found: {software_dir}", file=sys.stderr)
-        return 2
 
     os.makedirs(out_dir, exist_ok=True)
     setup_logging(out_dir, args.partition)
+
+    # CPU only: hide every GPU from torch so CUDA cannot be selected even by
+    # accident. This must run before torch is imported.
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
     # Thread limits must be set before torch is imported to bind the native
     # pools; setdefault respects any value the operator already exported.
@@ -478,6 +712,10 @@ def run(args):
         "partition %d of %d | rescan=%s",
         args.partition, args.num_partitions, args.rescan,
     )
+
+    # Provenance sidecar, one file per partition so processes do not race.
+    meta_path, _meta = write_run_metadata(out_dir, software_dir, root, args)
+    LOG.info("Wrote run metadata: %s", os.path.basename(meta_path))
 
     # The engine and its weights live in software_dir; import from there.
     sys.path.insert(0, software_dir)
@@ -516,8 +754,27 @@ def run(args):
         "Shards to process after resume skip: %d (%d images)",
         len(plan), plan_images,
     )
+    # The master is a derived snapshot. Only partition 0 writes it, so a
+    # multi-process run does not race on it; during such a run the master
+    # reflects only the shards finished so far (by any partition), so run
+    # "--merge" once all partitions have finished for the definitive file.
+    merge_out = (
+        os.path.abspath(args.merge_out)
+        if args.merge_out
+        else os.path.join(out_dir, "master.csv")
+    )
+    do_merge = args.merge_every > 0 and args.partition == 0
+    if args.merge_every > 0 and args.partition != 0:
+        LOG.info(
+            "--merge-every ignored on partition %d; only partition 0 writes the master",
+            args.partition,
+        )
+
     if not plan:
         LOG.info("Nothing to do; all shards in this partition already have CSVs")
+        if do_merge:
+            n_files, n_rows = merge_csvs(out_dir, merge_out)
+            LOG.info("Master rebuilt: %d shards, %d rows -> %s", n_files, n_rows, merge_out)
         return 0
 
     stopper = Stopper()
@@ -526,9 +783,16 @@ def run(args):
 
     progress = Progress(plan_images)
     processed = 0
+    last_merge = time.monotonic()
     for leaf_dir, image_paths, csv_path in plan:
         if stopper.stop:
             LOG.warning("Stopping before next shard as requested")
+            break
+        if args.max_images is not None and progress.done >= args.max_images:
+            LOG.info(
+                "Reached --max-images %d (%d images done); stopping at shard boundary",
+                args.max_images, progress.done,
+            )
             break
         shard_label = os.path.relpath(leaf_dir, root)
         LOG.info(
@@ -549,6 +813,20 @@ def run(args):
         progress.add(len(image_paths))
         processed += 1
         LOG.info("Finished %s | %s", shard_label, progress.summary())
+        if do_merge and (time.monotonic() - last_merge) >= args.merge_every:
+            n_files, n_rows = merge_csvs(out_dir, merge_out)
+            LOG.info(
+                "Master refreshed: %d shards, %d rows -> %s",
+                n_files, n_rows, os.path.basename(merge_out),
+            )
+            last_merge = time.monotonic()
+
+    if do_merge:
+        n_files, n_rows = merge_csvs(out_dir, merge_out)
+        LOG.info(
+            "Master (final this session): %d shards, %d rows -> %s",
+            n_files, n_rows, merge_out,
+        )
 
     LOG.info(
         "Run ended: %d shards written this session | %s",
@@ -569,17 +847,19 @@ def build_arg_parser():
         ),
     )
     parser.add_argument(
-        "--software-dir", required=True,
+        "--software-dir",
         help="Directory of the DeepFaune v1.4.1 source and weights (added to "
-             "sys.path; its predictTools is imported).",
+             "sys.path; its predictTools is imported). Required for a run.",
     )
     parser.add_argument(
-        "--root", required=True,
-        help="Top of the image tree to classify (read-only source archive).",
+        "--root",
+        help="Top of the image tree to classify (read-only source archive). "
+             "Required for a run and for --dry-run.",
     )
     parser.add_argument(
         "--out-dir", required=True,
-        help="Directory on local disk for the per-shard CSVs and the log.",
+        help="Directory on local disk for the per-shard CSVs, master, logs and "
+             "metadata.",
     )
     parser.add_argument(
         "--detector", default="DF", choices=DETECTOR_CHOICES,
@@ -626,6 +906,25 @@ def build_arg_parser():
         help="Reprocess every shard even if its CSV exists (overwrite).",
     )
     parser.add_argument(
+        "--max-images", type=int, default=None,
+        help="Stop the run at the next shard boundary after this many images "
+             "(for benchmarks and time-boxed trials).",
+    )
+    parser.add_argument(
+        "--merge-every", type=int, default=0,
+        help="During a run, regenerate the master CSV every N seconds and once "
+             "at the end. Only partition 0 writes it. 0 disables (default).",
+    )
+    parser.add_argument(
+        "--merge", action="store_true",
+        help="Standalone: rebuild the master CSV from the per-shard CSVs in "
+             "--out-dir, then exit. No models loaded.",
+    )
+    parser.add_argument(
+        "--merge-out", default=None,
+        help="Master CSV path (default: <out-dir>/master.csv).",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Build the shard manifest and print counts without loading models.",
     )
@@ -636,6 +935,8 @@ def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     if args.dry_run:
         return dry_run(args)
+    if args.merge:
+        return merge_mode(args)
     return run(args)
 
 

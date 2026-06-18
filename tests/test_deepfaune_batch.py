@@ -6,12 +6,22 @@ them need torch or the model weights, so they run anywhere.
 """
 
 import csv
+import json
 import os
 import re
+import sys
 
 import pytest
 
 import deepfaune_batch as dfb
+
+
+def _args(**overrides):
+    """Build an args namespace with defaults, then apply overrides."""
+    args = dfb.build_arg_parser().parse_args(["--out-dir", "/tmp/unused"])
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
 
 
 # ---------------------------------------------------------------------------
@@ -238,3 +248,191 @@ def test_progress_summary_runs():
     summary = progress.summary()
     assert "25/100" in summary
     assert "ETA" in summary
+
+
+# ---------------------------------------------------------------------------
+# input validation
+# ---------------------------------------------------------------------------
+def test_validate_common_accepts_defaults():
+    assert dfb.validate_common(_args()) is None
+
+
+def test_validate_common_rejects_batch_size_zero_and_negative():
+    err = dfb.validate_common(_args(batch_size=0))
+    assert err is not None and "batch-size" in err
+    assert dfb.validate_common(_args(batch_size=-3)) is not None
+
+
+def test_validate_common_threshold_bounds():
+    assert dfb.validate_common(_args(threshold=0)) is not None
+    assert dfb.validate_common(_args(threshold=1.5)) is not None
+    assert dfb.validate_common(_args(threshold=-0.1)) is not None
+    assert dfb.validate_common(_args(threshold=1.0)) is None
+    assert dfb.validate_common(_args(threshold=0.5)) is None
+
+
+def test_validate_common_maxlag_heartbeat_mergeevery():
+    assert dfb.validate_common(_args(maxlag=-1)) is not None
+    assert dfb.validate_common(_args(maxlag=0)) is None
+    assert dfb.validate_common(_args(heartbeat_secs=-1)) is not None
+    assert dfb.validate_common(_args(merge_every=-1)) is not None
+
+
+def test_validate_common_max_images():
+    assert dfb.validate_common(_args(max_images=0)) is not None
+    assert dfb.validate_common(_args(max_images=None)) is None
+    assert dfb.validate_common(_args(max_images=10)) is None
+
+
+def test_validate_common_partition_range():
+    assert dfb.validate_common(_args(num_partitions=1, partition=1)) is not None
+    assert dfb.validate_common(_args(num_partitions=0)) is not None
+    assert dfb.validate_common(_args(num_partitions=2, partition=0)) is None
+
+
+def test_batch_size_zero_rejected_before_torch_import(tmp_path, capsys):
+    rc = dfb.main(
+        [
+            "--root", str(tmp_path),
+            "--out-dir", str(tmp_path / "out"),
+            "--software-dir", str(tmp_path),
+            "--batch-size", "0",
+        ]
+    )
+    assert rc == 2
+    # The critical guarantee: the run bailed out before importing the engine.
+    assert "torch" not in sys.modules
+    assert "batch-size" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# path containment (the commonpath fix)
+# ---------------------------------------------------------------------------
+def test_is_within():
+    assert dfb.is_within("/a/b/c", "/a/b")
+    assert dfb.is_within("/a/b", "/a/b")  # equal counts as within
+    assert not dfb.is_within("/a/bc", "/a/b")  # sibling sharing a prefix
+    assert not dfb.is_within("/x", "/a/b")
+    # The edge case a string-prefix check gets wrong: root being "/".
+    assert dfb.is_within("/anything", "/")
+
+
+# ---------------------------------------------------------------------------
+# master CSV merge
+# ---------------------------------------------------------------------------
+def _write_shard_csv(path, data_rows):
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(dfb.CSV_HEADER)
+        writer.writerows(data_rows)
+
+
+def test_merge_csvs_header_once_quoting_and_ignores_decoys(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    _write_shard_csv(
+        out / "shardA__a.csv",
+        [["/a/1.jpg", "d", 1, "wolf, grey", 0.9, "wolf", 0.9, 1, 0]],
+    )
+    _write_shard_csv(
+        out / "shardB__b.csv",
+        [["/b/2.jpg", "d", 1, "lynx", 0.8, "lynx", 0.8, 1, 0]],
+    )
+    # Decoys that must be ignored by the "*.csv" glob / exclusions.
+    (out / "partial.csv.tmp").write_text("garbage\n", encoding="utf-8")
+    (out / "run_metadata.p0.json").write_text("{}", encoding="utf-8")
+
+    merge_out = out / "master.csv"
+    n_files, n_rows = dfb.merge_csvs(str(out), str(merge_out))
+    assert (n_files, n_rows) == (2, 2)
+
+    with open(merge_out, newline="", encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
+    assert rows[0] == dfb.CSV_HEADER  # header written exactly once
+    assert len(rows) == 3  # header + two data rows
+    species = {r[3] for r in rows[1:]}
+    assert "wolf, grey" in species  # comma survived quoting as one field
+    assert "lynx" in species
+    # The merge's own temp file was renamed away (the decoy .tmp is left alone).
+    assert not [p for p in out.iterdir() if p.name.startswith("master.csv.")]
+
+
+def test_merge_csvs_excludes_master_and_is_idempotent(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    _write_shard_csv(
+        out / "shardA__a.csv",
+        [["/a/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0]],
+    )
+    merge_out = out / "master.csv"
+    dfb.merge_csvs(str(out), str(merge_out))
+    # Re-running must not fold the master back into itself.
+    n_files, n_rows = dfb.merge_csvs(str(out), str(merge_out))
+    assert (n_files, n_rows) == (1, 1)
+    with open(merge_out, newline="", encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
+    assert len(rows) == 2  # header + one data row
+
+
+def test_iter_shard_csvs_filters_and_excludes(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "a.csv").write_text("x", encoding="utf-8")
+    (out / "b.csv").write_text("x", encoding="utf-8")
+    (out / "c.csv.tmp").write_text("x", encoding="utf-8")  # temp, ignored
+    (out / "meta.json").write_text("x", encoding="utf-8")  # sidecar, ignored
+    got = [
+        os.path.basename(p)
+        for p in dfb.iter_shard_csvs(str(out), exclude=[str(out / "b.csv")])
+    ]
+    assert got == ["a.csv"]
+
+
+# ---------------------------------------------------------------------------
+# provenance sidecar
+# ---------------------------------------------------------------------------
+def test_write_run_metadata(tmp_path):
+    sw = tmp_path / "sw"
+    sw.mkdir()
+    (sw / "ChangeLog.txt").write_text(
+        "2025-11-07  Author\n\n    Version 1.4.1\n", encoding="utf-8"
+    )
+    (sw / "model.pt").write_bytes(b"x" * 10)
+    out = tmp_path / "out"
+    out.mkdir()
+    args = _args(detector="DFbsMDS", birds=True, threshold=0.6, partition=0)
+
+    path, meta = dfb.write_run_metadata(str(out), str(sw), "/some/root", args)
+    assert os.path.basename(path) == "run_metadata.p0.json"
+
+    with open(path, encoding="utf-8") as handle:
+        on_disk = json.load(handle)
+    assert on_disk["deepfaune_version"] == "1.4.1"
+    assert on_disk["weights"]["model.pt"] == 10
+    assert on_disk["root"] == "/some/root"
+    assert on_disk["detector"] == "DFbsMDS"
+    assert on_disk["birds"] is True
+    assert on_disk["threshold"] == 0.6
+    assert "hostname" in on_disk
+    assert on_disk["utc_start_time"].endswith("+00:00")
+    assert "orchestrator_git_commit" in on_disk  # a sha or None
+
+
+def test_read_deepfaune_version_missing_changelog(tmp_path):
+    assert dfb.read_deepfaune_version(str(tmp_path)) is None
+
+
+def test_metadata_one_file_per_partition(tmp_path):
+    sw = tmp_path / "sw"
+    sw.mkdir()
+    out = tmp_path / "out"
+    out.mkdir()
+    p0, _ = dfb.write_run_metadata(
+        str(out), str(sw), "/r", _args(partition=0, num_partitions=2)
+    )
+    p1, _ = dfb.write_run_metadata(
+        str(out), str(sw), "/r", _args(partition=1, num_partitions=2)
+    )
+    assert os.path.basename(p0) == "run_metadata.p0.json"
+    assert os.path.basename(p1) == "run_metadata.p1.json"
+    assert p0 != p1

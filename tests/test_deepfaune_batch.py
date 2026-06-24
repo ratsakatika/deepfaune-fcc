@@ -290,7 +290,11 @@ def test_validate_common_partition_range():
     assert dfb.validate_common(_args(num_partitions=2, partition=0)) is None
 
 
-def test_batch_size_zero_rejected_before_torch_import(tmp_path, capsys):
+def test_batch_size_zero_rejected_before_torch_import(tmp_path, capsys, monkeypatch):
+    # Start from a clean slate so the check is independent of any other test that
+    # may have placed a torch (real or stubbed) into sys.modules; monkeypatch
+    # restores the previous state afterwards.
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
     rc = dfb.main(
         [
             "--root", str(tmp_path),

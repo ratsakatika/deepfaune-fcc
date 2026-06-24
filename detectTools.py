@@ -170,6 +170,11 @@ class Detector:
         except Exception as err:
             print(err)
             return None, 0, np.zeros(4), 0, []
+        # Ultralytics returns an empty results list when it cannot read an image
+        # (a corrupt or truncated file gives "Image Read Error"). Guard before
+        # indexing so a single bad file does not crash a multi-day batch run.
+        if results is None or len(results) == 0:
+            return None, 0, np.zeros(4), 0, []
         # orig_img a numpy array (cv2) in BGR
         imagecv = results[0].cpu().orig_img
         detection = results[0].cpu().numpy().boxes

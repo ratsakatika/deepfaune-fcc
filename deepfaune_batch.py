@@ -1062,9 +1062,9 @@ def build_arg_parser():
         help="Detector model (default: DF, the lightest).",
     )
     parser.add_argument(
-        "--threshold", type=float, default=0.8,
-        help="Classification confidence threshold (default: 0.8, the official "
-             "DeepFaune GUI default).",
+        "--threshold", type=float, default=0.5,
+        help="Classification confidence threshold (default: 0.5, matching the "
+             "demo script and the first long run).",
     )
     parser.add_argument(
         "--maxlag", type=int, default=10,

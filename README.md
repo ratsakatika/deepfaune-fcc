@@ -43,17 +43,16 @@ To resume after any stop, just run `dfrun` again; finished shards are skipped.
 | detector | DF | DF, MDS, DFbsMDS, DFMDS or MDR. DF is the lightest; avoid MDR on CPU. |
 | birds | on | The 8-way bird sub-classifier head. |
 | threshold | 0.5 | Matches the demo script and the first long run (the GUI uses 0.8). |
-| maxlag | 10 s | The official GUI default for the sequence burst gap (the demo uses 20). |
+| maxlag | 20 s | Matches the demo script and the first long run (the GUI uses 10). |
 | batch-size | 8 | Must be at least 1. |
 | threads | 4 | Must be at least 1. Capping this also bounds memory use. |
 | merge-every | 600 s | Rebuild master.csv on this interval; 0 disables it. |
 
-Note on consistency: the first long run used threshold 0.5 and maxlag 20. The
-tool now defaults to threshold 0.5 (matching that run and the demo script) and
-maxlag 10 (the official GUI value). The threshold therefore matches the shards
-already classified; only maxlag differs, so sequence grouping is not identical
-across old and new shards. `dfrun` warns when a previous run used different
-values, and `--rescan` re-does everything uniformly.
+Note on consistency: the first long run used threshold 0.5 and maxlag 20, and
+the tool now defaults to exactly that, so a continued run stays consistent with
+the shards already classified (no mixed dataset). The official GUI uses 0.8/10.
+`dfrun` warns if a previous run used different values, and `--rescan` re-does
+everything uniformly.
 
 ## Outputs
 

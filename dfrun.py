@@ -57,14 +57,14 @@ SEARCH_GLOBS = ("/media/{user}/*", "/mnt/*")
 # Memory: offer a swapfile if total swap is below this.
 MIN_TOTAL_SWAP_GIB = 16
 
-# Run parameter defaults. Threshold 0.5 matches the demo script and the first
-# long run; maxlag 10 follows the official DeepFaune GUI (the GUI uses 0.8/10,
-# the demo 0.5/20). New shards use 0.5/10.
+# Run parameter defaults. Threshold 0.5 and maxlag 20 match the first long run
+# (and the demo script), so a continued run stays consistent with the shards
+# already classified. (The official GUI uses 0.8/10.)
 DEFAULTS = {
     "detector": "DF",
     "birds": True,
     "threshold": 0.5,
-    "maxlag": 10,
+    "maxlag": 20,
     "batch_size": 8,
     "threads": 4,
     "merge_every": 600,

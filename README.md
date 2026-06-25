@@ -71,10 +71,27 @@ To resume after any stop, just run `dfrun` again; finished shards are skipped.
 
 What each setting does:
 
-- **detector** - the model that finds the animal, human or vehicle boxes in each
-  photo before it is identified. DF (yolov8s) is the fastest and the default;
-  MDS, DFbsMDS and DFMDS add MegaDetector for higher recall at more cost; MDR is
-  the most thorough but impractical on a CPU.
+- **detector** - the first stage that finds the animal, human or vehicle boxes in
+  each photo (a separate model then names the species, and that part is the same
+  whichever detector you choose). Two base detectors and two ways of combining
+  them, roughly fastest/lowest recall to slowest/highest
+  (`DF` ~ `MDS` < `DFbsMDS` < `DFMDS` << `MDR`):
+  - **DF** (default) - DeepFaune's own detector, a YOLOv8s model trained on
+    European camera-trap images, run at 960 px. The lightest and fastest.
+  - **MDS** - MegaDetector "sorrel" (MegaDetector v1000, the widely used
+    general-purpose detector from Microsoft / Dan Morris) at 960 px. Similar speed
+    to DF but trained differently, so it finds some things DF misses.
+  - **MDR** - MegaDetector "redwood" (v1000) at 1280 px. Potentially the best at
+    finding animals, but much slower and intended for a machine with a graphics
+    card; avoid it on this CPU-only box.
+  - **DFbsMDS** ("DF, backstop MDS") - runs DF first, and only tries MDS on photos
+    where DF found nothing. A cheap way to recover a few animals DF alone misses.
+  - **DFMDS** ("DF + MDS ensemble") - runs both detectors on every photo and
+    merges their boxes. The highest recall of the 960 px options, but the slowest.
+
+  For this box: DF is the default and what the first long run used; DFbsMDS is the
+  sensible "a bit more thorough" option; DFMDS only if you can spare the time; MDR
+  not on CPU.
 - **birds** - when on, crops classed as "bird" are split into eight groups
   (corvid, raptor, passerine and so on); when off they stay as "bird".
 - **threshold** - the classification confidence cut-off. A prediction scoring

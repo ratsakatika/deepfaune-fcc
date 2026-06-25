@@ -44,7 +44,7 @@ if [ -d "${DESKTOP_DIR}" ]; then
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=dfrun (DeepFaune)
+Name=Run DeepFaune
 Comment=Run the DeepFaune camera-trap classifier
 Exec=gnome-terminal -- bash -lc '"${WRAPPER}"; echo; read -n 1 -s -r -p "Press any key to close..."'
 Icon=${REPO_DIR}/icons/logoINEE.png

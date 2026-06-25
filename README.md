@@ -25,7 +25,7 @@ A step-by-step guide is on the desktop as **How_to_use_dfrun.html**; the same
 guide is here: [docs/USER_GUIDE.html](docs/USER_GUIDE.html). In short:
 
 1. Connect the "My Book" hard drive.
-2. Open the **dfrun (DeepFaune)** icon on the desktop. The first time only,
+2. Open the **Run DeepFaune** icon on the desktop. The first time only,
    right-click it and choose "Allow Launching".
 3. Confirm the settings at the prompts: press Enter to accept a value, or type a
    new value and press Enter.

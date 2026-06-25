@@ -1067,9 +1067,9 @@ def build_arg_parser():
              "demo script and the first long run).",
     )
     parser.add_argument(
-        "--maxlag", type=int, default=10,
-        help="Seconds between photos to count as one EXIF burst (default: 10, "
-             "the official DeepFaune GUI default).",
+        "--maxlag", type=int, default=20,
+        help="Seconds between photos to count as one EXIF burst (default: 20, "
+             "matching the first long run).",
     )
     parser.add_argument(
         "--lang", default="en", choices=LANG_CHOICES,

@@ -321,10 +321,10 @@ def test_validate_common_threads():
 
 
 def test_default_parameters():
-    # Threshold 0.5 (matches the first long run and the demo) and maxlag 10.
+    # Threshold 0.5 and maxlag 20 match the first long run (and the demo).
     args = dfb.build_arg_parser().parse_args(["--out-dir", "/tmp/unused"])
     assert args.threshold == 0.5
-    assert args.maxlag == 10
+    assert args.maxlag == 20
     assert args.threads == 4
 
 

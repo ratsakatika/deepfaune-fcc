@@ -1087,16 +1087,46 @@ def main(argv=None):
     stage_swap(args)
 
     print("Launching the classifier, detached...")
-    pid = launch_detached(software_dir, source, out_dir, params)
-    print(f"Worker PID {pid}. Detailed log: {os.path.join(out_dir, 'deepfaune_batch.p0.log')}")
-    print("You can close this window or disconnect; the run continues.")
-
-    final = live_readout(out_dir)
-    if final and final.get("state") == "finished" and not worker_running(out_dir):
-        finish_outputs(out_dir)
-    elif final and final.get("state") == "stopped":
-        print("Worker stopped early. Re-run the tool to resume from where it left off.")
+    supervise(software_dir, source, out_dir, params, args)
     return 0
+
+
+def supervise(software_dir, source, out_dir, params, args):
+    """Launch the worker, show the readout, and optionally auto-resume.
+
+    With --watchdog, if the worker exits with work remaining while the drive is
+    still present, the run is resumed up to --max-retries times, each logged. A
+    user detaching (the worker stays alive) is never treated as a failure.
+    """
+    retries = 0
+    while True:
+        pid = launch_detached(software_dir, source, out_dir, params)
+        print(
+            f"Worker PID {pid}. Detailed log: "
+            f"{os.path.join(out_dir, 'deepfaune_batch.p0.log')}"
+        )
+        print("You can close this window or disconnect; the run continues.")
+        final = live_readout(out_dir)
+        if worker_running(out_dir):
+            print("Detached; the worker is still running. Re-run dfrun to reattach.")
+            return
+        state = (final or {}).get("state")
+        if state == "finished":
+            finish_outputs(out_dir)
+            return
+        if (args.watchdog and retries < args.max_retries
+                and os.path.isdir(source) and looks_like_archive(source)):
+            done = dfb.count_classified_images(out_dir)
+            total = (final or {}).get("archive_total") or 0
+            if total and done < total:
+                retries += 1
+                print(
+                    f"Watchdog: worker stopped with work remaining; resuming "
+                    f"(attempt {retries}/{args.max_retries})..."
+                )
+                continue
+        print("Worker stopped early. Re-run the tool to resume from where it left off.")
+        return
 
 
 def finish_outputs(out_dir):

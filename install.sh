@@ -12,7 +12,10 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="${HOME}/.local/bin"
 DESKTOP_DIR="${HOME}/Desktop"
-PYTHON="${PYTHON:-python3}"
+# Capture the active Python (the virtual environment's, if one is active) by its
+# full path, so the launcher and Desktop icon use it directly without the user
+# having to activate the environment first.
+PYTHON="${PYTHON:-$(command -v python3 || echo python3)}"
 
 # 1. Launcher on PATH.
 mkdir -p "${BIN_DIR}"

@@ -29,7 +29,7 @@ guide is here: [docs/USER_GUIDE.html](docs/USER_GUIDE.html). In short:
    right-click it and choose "Allow Launching".
 3. Confirm the settings at the prompts: press Enter to accept a value, or type a
    new value and press Enter.
-4. Processing runs on the computer. You may close the window or disconnect; it
+4. Processing runs on the computer. You may close the window or disconnect (if connected remotely); it
    continues. Open the icon again at any time to view progress.
 5. When it finishes, the dashboard opens in a web browser and the result files
    are on the desktop. If it stops, open the icon again to resume.

@@ -344,6 +344,43 @@ def test_build_dashboard_missing_builder_returns_none(tmp_path, monkeypatch):
     assert dfrun.build_dashboard(str(tmp_path / "no_software"), str(tmp_path)) is None
 
 
+def test_parse_detector():
+    assert dfrun.parse_detector("dfbsmds") == ("DFbsMDS", True)
+    assert dfrun.parse_detector("DF") == ("DF", True)
+    assert dfrun.parse_detector("nope") == (None, False)
+
+
+def test_parse_onoff():
+    assert dfrun.parse_onoff("on")[0] is True
+    assert dfrun.parse_onoff("OFF")[0] is False
+    assert dfrun.parse_onoff("maybe") == (None, False)
+
+
+def test_parse_threshold():
+    assert dfrun.parse_threshold("0.5") == (0.5, True)
+    assert dfrun.parse_threshold("1") == (1.0, True)
+    assert dfrun.parse_threshold("0") == (None, False)
+    assert dfrun.parse_threshold("1.5") == (None, False)
+    assert dfrun.parse_threshold("x") == (None, False)
+
+
+def test_parse_int_helpers():
+    assert dfrun.parse_nonneg_int("0") == (0, True)
+    assert dfrun.parse_nonneg_int("-1") == (None, False)
+    assert dfrun.parse_pos_int("1") == (1, True)
+    assert dfrun.parse_pos_int("0") == (None, False)
+    assert dfrun.parse_pos_int("x") == (None, False)
+
+
+def test_prompt_setting_keep_change_invalid(monkeypatch):
+    monkeypatch.setattr(dfrun, "_default_prompt", lambda m: "")     # Enter keeps
+    assert dfrun.prompt_setting("e", "L", 4, dfrun.parse_pos_int) == 4
+    monkeypatch.setattr(dfrun, "_default_prompt", lambda m: "8")    # valid change
+    assert dfrun.prompt_setting("e", "L", 4, dfrun.parse_pos_int) == 8
+    monkeypatch.setattr(dfrun, "_default_prompt", lambda m: "abc")  # invalid keeps
+    assert dfrun.prompt_setting("e", "L", 4, dfrun.parse_pos_int) == 4
+
+
 def test_maybe_rebuild_dashboard_guards(tmp_path, monkeypatch):
     # No change in mtime: no build, returns the same handle.
     monkeypatch.setattr(dfrun, "spawn_dashboard", lambda *a: pytest.fail("should not build"))

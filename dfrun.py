@@ -928,6 +928,70 @@ def stage_assess(out_dir, source, uuid, rescan):
     return done, remaining, total
 
 
+# --- interactive setting prompts -------------------------------------------
+def parse_detector(reply):
+    for choice in dfb.DETECTOR_CHOICES:
+        if choice.lower() == reply.strip().lower():
+            return choice, True
+    return None, False
+
+
+def parse_onoff(reply):
+    r = reply.strip().lower()
+    if r in ("on", "yes", "y", "true", "1"):
+        return True, True
+    if r in ("off", "no", "n", "false", "0"):
+        return False, True
+    return None, False
+
+
+def parse_threshold(reply):
+    try:
+        value = float(reply)
+    except ValueError:
+        return None, False
+    return (value, True) if 0 < value <= 1 else (None, False)
+
+
+def parse_nonneg_int(reply):
+    try:
+        value = int(reply)
+    except ValueError:
+        return None, False
+    return (value, True) if value >= 0 else (None, False)
+
+
+def parse_pos_int(reply):
+    try:
+        value = int(reply)
+    except ValueError:
+        return None, False
+    return (value, True) if value >= 1 else (None, False)
+
+
+def prompt_setting(explain, label, current, parser, shown=None):
+    """Print a one-line explanation, then prompt. Return the new value or current.
+
+    Enter (blank) keeps the current value; an unparseable entry keeps it too,
+    with a short note.
+    """
+    display = shown if shown is not None else current
+    print(explain)
+    reply = _default_prompt(f"  {label} [{display}]: ").strip()
+    if not reply:
+        return current
+    value, ok = parser(reply)
+    if not ok:
+        print(f"  Not valid; keeping {display}.")
+        return current
+    return value
+
+
+def _print_params(params):
+    for key in ("detector", "birds", "threshold", "maxlag", "batch_size", "threads", "merge_every"):
+        print(f"  {key:12s} {params[key]}")
+
+
 def stage_configure(args, out_dir):
     """Stage 4: show parameters and let the user confirm or change them."""
     params = {
@@ -953,20 +1017,46 @@ def stage_configure(args, out_dir):
                 "Completed shards keep their old values (mixed dataset)."
             )
     print("Run parameters:")
-    for key in ("detector", "birds", "threshold", "maxlag", "batch_size", "threads", "merge_every"):
-        print(f"  {key:12s} {params[key]}")
-    if not args.yes:
-        reply = _default_prompt(
-            f"Threads [{params['threads']}]: Enter to keep, or type a new count: "
-        ).strip()
-        if reply:
-            try:
-                params["threads"] = max(1, int(reply))
-            except ValueError:
-                print(f"Not a number; keeping {params['threads']} threads.")
-        if _default_prompt("Proceed with these settings? [Y/n] ").strip().lower() in ("n", "no"):
-            print("Aborted by user before launch.")
-            return None
+    _print_params(params)
+    if args.yes:
+        return params
+    print("\nAdjust the settings. Press Enter to keep each suggested value.")
+    params["detector"] = prompt_setting(
+        "Detector: the model that finds animals before they are named. DF is "
+        "fastest (default); DFbsMDS is more thorough; DFMDS is most thorough but "
+        "slow; MDR is too slow without a graphics card.",
+        f"Detector ({'/'.join(dfb.DETECTOR_CHOICES)})", params["detector"], parse_detector)
+    params["birds"] = prompt_setting(
+        "Bird sub-groups: sort birds into groups (corvid, raptor, passerine and "
+        "so on) instead of just 'bird'.",
+        "Bird sub-groups (on/off)", params["birds"], parse_onoff,
+        shown=("on" if params["birds"] else "off"))
+    params["threshold"] = prompt_setting(
+        "Confidence threshold: how sure the model must be to name a species. "
+        "Higher means fewer wrong names but more animals left 'undefined'; lower "
+        "names more but with more mistakes.",
+        "Threshold (0 to 1)", params["threshold"], parse_threshold)
+    params["maxlag"] = prompt_setting(
+        "Sequence gap: photos at one camera within this many seconds count as a "
+        "single detection, so a burst of frames is counted once.",
+        "Sequence gap (seconds)", params["maxlag"], parse_nonneg_int)
+    params["batch_size"] = prompt_setting(
+        "Batch size: how many image crops are classified at once. Affects speed "
+        "and memory only, not the results.",
+        "Batch size", params["batch_size"], parse_pos_int)
+    params["threads"] = prompt_setting(
+        "Processor cores: how much of the processor to use. More is faster but "
+        "uses more memory and runs hotter.",
+        "Processor cores", params["threads"], parse_pos_int)
+    params["merge_every"] = prompt_setting(
+        "Update interval: how often the master CSV and dashboard refresh during "
+        "the run (seconds). Does not affect the results.",
+        "Update interval (seconds)", params["merge_every"], parse_nonneg_int)
+    print("\nFinal settings:")
+    _print_params(params)
+    if _default_prompt("Proceed with these settings? [Y/n] ").strip().lower() in ("n", "no"):
+        print("Aborted by user before launch.")
+        return None
     return params
 
 
@@ -1292,7 +1382,7 @@ def supervise(software_dir, source, out_dir, params, args):
             f"Worker PID {pid}. Detailed log: "
             f"{os.path.join(out_dir, 'deepfaune_batch.p0.log')}"
         )
-        print("You can close this window or disconnect; the run continues.")
+        print("You can close this window or disconnect (if connected remotely); the run continues.")
         final = live_readout(out_dir, software_dir=software_dir)
         if worker_running(out_dir):
             print("Detached; the worker is still running. Re-run dfrun to reattach.")

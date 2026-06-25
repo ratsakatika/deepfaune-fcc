@@ -69,6 +69,32 @@ To resume after any stop, just run `dfrun` again; finished shards are skipped.
 | threads | 4 | Must be at least 1. Capping this also bounds memory use. |
 | merge-every | 600 s | Rebuild master.csv on this interval; 0 disables it. |
 
+What each setting does:
+
+- **detector** - the model that finds the animal, human or vehicle boxes in each
+  photo before it is identified. DF (yolov8s) is the fastest and the default;
+  MDS, DFbsMDS and DFMDS add MegaDetector for higher recall at more cost; MDR is
+  the most thorough but impractical on a CPU.
+- **birds** - when on, crops classed as "bird" are split into eight groups
+  (corvid, raptor, passerine and so on); when off they stay as "bird".
+- **threshold** - the classification confidence cut-off. A prediction scoring
+  below it is recorded as "undefined". Higher (for example 0.8) means fewer false
+  positives (fewer wrong species labels) but more false negatives (more real
+  animals left undefined); lower means more photos get a species name, but more
+  of those names are wrong. 0.5 is a balanced middle.
+- **maxlag** - the time gap, in seconds, within which consecutive photos in the
+  same folder are grouped into one detection event (a sequence), so a burst of
+  frames is counted once. A larger gap merges more frames into a single event
+  (less double-counting of a lingering animal, but two separate visits close in
+  time may merge); a smaller gap splits them into more events.
+- **batch-size** - how many animal crops are classified at once. This affects
+  speed and memory only, not the results; larger is slightly faster but uses more
+  memory.
+- **threads** - how many processor cores are used. More is faster but uses more
+  memory and runs hotter; capping it also bounds memory use.
+- **merge-every** - how often, in seconds, the master CSV and dashboard are
+  rebuilt during a run. This affects how often you see progress, not the results.
+
 Note on consistency: the first long run used threshold 0.5 and maxlag 20, and
 the tool now defaults to exactly that, so a continued run stays consistent with
 the shards already classified (no mixed dataset). The official GUI uses 0.8/10.

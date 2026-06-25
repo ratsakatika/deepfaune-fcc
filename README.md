@@ -50,8 +50,8 @@ update is the main day-to-day use.
 3. Plug in the archive drive (mounted read-only) and run `dfrun`.
 4. Follow the stages: it checks for a newer version, finds the drive, reports
    how much is already done, asks you to confirm the settings, then launches.
-5. Watch the live readout. You can close the window or disconnect; the run
-   keeps going. Re-run `dfrun` to reattach to it.
+5. Watch the live readout. You can close the window or disconnect (if connected
+   remotely); the run keeps going. Re-run `dfrun` to reattach to it.
 6. When it finishes, a dashboard opens in your browser and the
    spreadsheet-friendly outputs are on your Desktop.
 

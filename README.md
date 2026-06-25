@@ -6,6 +6,92 @@
 
 
 ---
+# FCC CAMERA-TRAP BATCH TOOLING
+---
+
+This fork adds a resumable, CPU-only pipeline for classifying the Fundatia
+Conservation Carpathia camera-trap archive with the official DeepFaune v1.4.1
+engine, plus a friendly front end. Two commands:
+
+- `dfrun` - the friendly front end: it finds the drive, assesses the work,
+  confirms the settings, launches the classifier detached, and shows a live
+  readout.
+- `deepfaune_batch.py` - the orchestrator that `dfrun` drives. It can also be
+  run directly.
+
+## Quick start
+
+1. Install the DeepFaune dependencies in a virtual environment (see the
+   DeepFaune documentation below), then add the front-end extras:
+   `pip install rich psutil`.
+2. Put the tool on PATH and add a Desktop shortcut: `make install`
+   (or `bash install.sh`). The first time you use the Desktop icon, right-click
+   it and choose "Allow Launching" so GNOME trusts it.
+3. Plug in the archive drive (mounted read-only) and run `dfrun`.
+4. Follow the stages: it checks for a newer version, finds the drive, reports
+   how much is already done, asks you to confirm the settings, then launches.
+5. Watch the live readout. You can close the window or disconnect; the run
+   keeps going. Re-run `dfrun` to reattach to it.
+6. When it finishes, the spreadsheet-friendly outputs are on your Desktop.
+
+To resume after any stop, just run `dfrun` again; finished shards are skipped.
+
+## Parameters and defaults
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| detector | DF | DF, MDS, DFbsMDS, DFMDS or MDR. DF is the lightest; avoid MDR on CPU. |
+| birds | on | The 8-way bird sub-classifier head. |
+| threshold | 0.8 | The official DeepFaune GUI default (the demo script uses 0.5). |
+| maxlag | 10 s | The official GUI default for the sequence burst gap (the demo uses 20). |
+| batch-size | 8 | Must be at least 1. |
+| threads | 4 | Must be at least 1. Capping this also bounds memory use. |
+| merge-every | 600 s | Rebuild master.csv on this interval; 0 disables it. |
+
+Note on consistency: the first long run used threshold 0.5 and maxlag 20 (the
+orchestrator's earlier defaults). The tool now defaults to the official 0.8 and
+10. Shards already classified keep their old values, so a continued run gives a
+mixed dataset. `dfrun` warns when a previous run used different values. To make
+the whole archive uniform, re-run with `--rescan`.
+
+## Outputs
+
+Working files stay in the output directory (default `~/df_out`):
+
+- one CSV per leaf directory (the source of truth), named `<path>__<hash>.csv`;
+- `master.csv`, a regenerated snapshot of all shard CSVs;
+- `run_metadata.p0.json` (provenance), `status.p0.json` (live status),
+  `deepfaune_batch.p0.log` (detailed log), and `unreadable_images.txt` if any
+  files could not be read.
+
+On the Desktop, for easy download:
+
+- `deepfaune_master.csv` (the full master; it exceeds Excel's row limit);
+- `deepfaune_wildlife.csv` (animals only; within the spreadsheet row limit);
+- `deepfaune_summary.csv` (per-species and per-station counts).
+
+## Resume and safety
+
+- Resumable: each shard's CSV is written atomically, and a shard that already
+  has a CSV is skipped, so stopping and restarting is safe.
+- CPU only: CUDA is disabled before torch is imported and the device is forced
+  to cpu.
+- The source drive is read-only and is never written to; all outputs go to
+  local disk. `dfrun` checks the read-only mount and the drive UUID first.
+- A single-instance lock prevents two workers, and the worker is launched
+  detached so it survives an SSH or editor disconnection.
+
+## Running the orchestrator directly
+
+`python deepfaune_batch.py --software-dir <dir> --root <archive> --out-dir
+~/df_out --birds`. Use `--dry-run` to enumerate without loading models,
+`--merge` to rebuild master.csv, and `--help` for all flags.
+
+## Tests
+
+`make test` (or `python -m pytest tests/ -q`).
+
+---
 # NEWS
 ---
 ## October 2025

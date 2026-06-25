@@ -244,14 +244,24 @@ def build_view(scope):
         h=nd.loc[mask,"h"]; return [int((h==k).sum()) for k in range(24)]
     sp_counts=ne["pred"].value_counts()
     ring_species=sorted([s for s in sp_counts.index if sp_counts[s]>=MINEV])
-    CLOCK_ORDER=["All wildlife"]+ring_species
+    WHV_KEY="All wildlife, humans and vehicles"   # mirrors the map's option
+    CLOCK_ORDER=["All wildlife",WHV_KEY]+ring_species
+    whv_mask=nd["guild"].isin(WILD_G) | nd["pred"].isin(["human","vehicle"])
     CLOCK={}
     for opt in CLOCK_ORDER:
-        cnt=diel24(nd["guild"].isin(WILD_G)) if opt=="All wildlife" else diel24(nd["pred"]==opt)
-        col=ALLCOL if opt=="All wildlife" else GCOL[guild(opt)]
+        if opt=="All wildlife":
+            cnt=diel24(nd["guild"].isin(WILD_G)); col=ALLCOL
+        elif opt==WHV_KEY:
+            cnt=diel24(whv_mask); col=ALLCOL
+        else:
+            cnt=diel24(nd["pred"]==opt); col=GCOL[guild(opt)]
         CLOCK[opt]={"color":col,"hr":cnt}
     ALL_WILD_N=int(ne[ne["guild"].isin(WILD_G)].shape[0])
-    def clab(o): return f"All wildlife ({ALL_WILD_N:,})" if o=="All wildlife" else o[:1].upper()+o[1:]+f" ({int(sp_counts[o]):,})"
+    ALL_WHV_N=int(ne[ne["guild"].isin(WILD_G) | ne["pred"].isin(["human","vehicle"])].shape[0])
+    def clab(o):
+        if o=="All wildlife": return f"All wildlife ({ALL_WILD_N:,})"
+        if o==WHV_KEY: return f"{WHV_KEY} ({ALL_WHV_N:,})"
+        return o[:1].upper()+o[1:]+f" ({int(sp_counts[o]):,})"
     clockOptions=[[o,clab(o)] for o in CLOCK_ORDER]
     # --- season: timeline (weekly) + month-of-year, guild overview + species drilldown
     gcols=[g for g in GORDER if g in nd["guild"].unique()]
@@ -267,7 +277,7 @@ def build_view(scope):
         if not sp: continue
         pv=(ndw[ndw["guild"]==g].pivot_table(index="week",columns="pred",values="seq_key",aggfunc="size",fill_value=0)
               .reindex(weeks,fill_value=0).reindex(columns=sp,fill_value=0))
-        phenoT_dr[g]=area_fig(weeks,pv,dict(zip(sp,distinct(GCOL[g],len(sp)))),
+        phenoT_dr[g]=area_fig(weeks,pv,{s:spcol(s) for s in sp},
             hover="week of %{x|%d %b %Y}<br>%{y} {name} events",ytitle="detection events / week")
     ndm=nd.copy(); ndm["moy"]=ndm["dt"].dt.month
     def moy_pivot(d,cols): return (d.pivot_table(index="moy",columns=cols,values="seq_key",aggfunc="size",fill_value=0).reindex(range(1,13),fill_value=0))
@@ -279,7 +289,7 @@ def build_view(scope):
         sp=ndm[ndm["guild"]==g]["pred"].value_counts(); sp=sp[sp>0].index.tolist()
         if not sp: continue
         pv=moy_pivot(ndm[ndm["guild"]==g],"pred").reindex(columns=sp,fill_value=0)
-        phenoS_dr[g]=area_fig(MLAB,pv,dict(zip(sp,distinct(GCOL[g],len(sp)))),
+        phenoS_dr[g]=area_fig(MLAB,pv,{s:spcol(s) for s in sp},
             hover="%{x}<br>%{y} {name} events",ytitle="detection events / month")
     # --- species bars ("what the cameras saw")
     SB_EXCL={"human","vehicle","undefined"}
@@ -766,7 +776,8 @@ function renderStations(){
 var curClock='All wildlife';
 function buildClock(optKey){
   var o=CLOCK[optKey]; if(!o)return; curClock=optKey;
-  var d=o.hr, col=(optKey==='All wildlife')?'#f0a839':colourFor(optKey), C=200,R0=78,RMAX=168;
+  var agg=(optKey==='All wildlife'||optKey==='All wildlife, humans and vehicles');
+  var d=o.hr, col=agg?'#f0a839':colourFor(optKey), C=200,R0=78,RMAX=168;
   var mx=Math.max.apply(null,d.concat([1])), total=d.reduce(function(a,b){return a+b;},0);
   function P(r,deg){var a=(deg-90)*Math.PI/180; return [(C+r*Math.cos(a)).toFixed(1),(C+r*Math.sin(a)).toFixed(1)];}
   var s='<defs><filter id="ringglow"><feGaussianBlur stdDeviation="2.4"/></filter></defs>';

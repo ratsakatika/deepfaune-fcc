@@ -835,7 +835,15 @@ def stage_configure(args, out_dir):
     for key in ("detector", "birds", "threshold", "maxlag", "batch_size", "threads", "merge_every"):
         print(f"  {key:12s} {params[key]}")
     if not args.yes:
-        if _default_prompt("Proceed with these? [Y/n] ").strip().lower() in ("n", "no"):
+        reply = _default_prompt(
+            f"Threads [{params['threads']}]: Enter to keep, or type a new count: "
+        ).strip()
+        if reply:
+            try:
+                params["threads"] = max(1, int(reply))
+            except ValueError:
+                print(f"Not a number; keeping {params['threads']} threads.")
+        if _default_prompt("Proceed with these settings? [Y/n] ").strip().lower() in ("n", "no"):
             print("Aborted by user before launch.")
             return None
     return params
@@ -845,6 +853,17 @@ def stage_swap(args):
     """Stage 4 (swap): check total swap and offer to create a swapfile."""
     total = current_swap_total_bytes()
     print(f"Swap total: {gib(total):.1f} GiB")
+    # Non-interactive override by flag (sizes the swapfile up or down).
+    if args.swap_gib is not None:
+        if args.swap_gib <= 0:
+            print("Skipping swapfile creation (--swap-gib <= 0).")
+            return
+        print(f"Creating a {args.swap_gib} GiB swapfile (requires sudo)...")
+        if create_swapfile(args.swap_gib):
+            print("Swapfile created and enabled. Add it to /etc/fstab to persist.")
+        else:
+            print("Swapfile creation did not complete; continuing without it.")
+        return
     if not needs_swap(total):
         return
     print(
@@ -1029,6 +1048,8 @@ def build_arg_parser():
     parser.add_argument("--maxlag", type=int, default=DEFAULTS["maxlag"])
     parser.add_argument("--batch-size", type=int, default=DEFAULTS["batch_size"])
     parser.add_argument("--threads", type=int, default=DEFAULTS["threads"])
+    parser.add_argument("--swap-gib", type=int, default=None,
+                        help="Create a swapfile of this many GiB before launch (needs sudo).")
     parser.add_argument("--merge-every", type=int, default=DEFAULTS["merge_every"])
     birds = parser.add_mutually_exclusive_group()
     birds.add_argument("--birds", dest="birds", action="store_true", default=DEFAULTS["birds"])

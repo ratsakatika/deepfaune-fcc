@@ -73,11 +73,28 @@ class _FakeYOLO:
         return self.value
 
 
+class _RaisingYOLO:
+    """Stand-in YOLO that raises, to exercise the except branches."""
+
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __call__(self, *args, **kwargs):
+        raise self.exc
+
+
 def _make_detector(yolo_value):
     # Bypass __init__ so no weights load; inject the mocked model directly.
     detector = detectTools.Detector.__new__(detectTools.Detector)
     detector.device = "cpu"
     detector.yolo = _FakeYOLO(yolo_value)
+    return detector
+
+
+def _make_raising_detector(exc):
+    detector = detectTools.Detector.__new__(detectTools.Detector)
+    detector.device = "cpu"
+    detector.yolo = _RaisingYOLO(exc)
     return detector
 
 
@@ -100,3 +117,34 @@ def test_best_box_detection_none_results_returns_nothing():
     # Defensive: a None result must also be handled without raising.
     detector = _make_detector(None)
     _assert_nothing_detected(detector.bestBoxDetection("missing.jpg"))
+
+
+def test_skipped_image_hook_records_unreadable():
+    recorded = []
+    detectTools.skipped_image_hook = lambda fn, reason: recorded.append((fn, reason))
+    try:
+        _assert_nothing_detected(_make_detector([]).bestBoxDetection("corrupt.jpg"))
+        _assert_nothing_detected(
+            _make_raising_detector(FileNotFoundError()).bestBoxDetection("gone.jpg")
+        )
+        _assert_nothing_detected(
+            _make_raising_detector(RuntimeError("boom")).bestBoxDetection("bad.jpg")
+        )
+    finally:
+        detectTools.skipped_image_hook = None
+    assert recorded == [
+        ("corrupt.jpg", "unreadable"),
+        ("gone.jpg", "missing"),
+        ("bad.jpg", "error"),
+    ]
+
+
+def test_skipped_image_hook_ignores_non_filename():
+    # Video frames and arrays have no filename; the hook must not be called.
+    recorded = []
+    detectTools.skipped_image_hook = lambda fn, reason: recorded.append(fn)
+    try:
+        _make_detector([]).bestBoxDetection(np.zeros((4, 4, 3)))
+    finally:
+        detectTools.skipped_image_hook = None
+    assert recorded == []

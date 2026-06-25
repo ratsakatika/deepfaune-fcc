@@ -1,0 +1,1168 @@
+#!/usr/bin/env python3
+# Copyright (c) 2025 Fundatia Conservation Carpathia batch tooling.
+#
+# dfrun: a friendly command-line front end for the DeepFaune batch orchestrator
+# (deepfaune_batch.py). It does NOT reimplement the classification engine; it
+# wraps the orchestrator as a detached subprocess and adds the operator
+# ergonomics learned from a long real run: a self-update check, robust drive
+# detection, a work assessment with a true overall percentage, a confirmation
+# screen, a detached launch that survives an SSH or editor disconnection, a
+# single-instance guard, a live readout, and easy spreadsheet-friendly outputs
+# on the Desktop.
+#
+# British English throughout; no em dashes. Only the standard library and
+# deepfaune_batch are imported at module load; rich and psutil are imported
+# lazily where used so the pure logic stays cheap and testable.
+
+import argparse
+import csv
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from collections import Counter
+from datetime import datetime, timedelta
+
+# Make deepfaune_batch importable when run as a script from the repo.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+import deepfaune_batch as dfb  # noqa: E402  (local, stdlib-only at import)
+
+
+####################################################################################
+### CONSTANTS (edit these in one place)
+####################################################################################
+TOOL_NAME = "dfrun"
+TOOL_VERSION = "1.0.0"
+GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
+# Single configurable contact string, as required.
+CONTACT = (
+    "Questions: Tom Ratsakatika trr26@cam.ac.uk / ratsakatika@gmail.com "
+    "or open a GitHub issue"
+)
+
+# Self-update: pull only from this remote and branch, fast-forward only.
+UPDATE_REMOTE = "origin"
+UPDATE_BRANCH = "main"
+
+# Drive identification.
+EXPECTED_DRIVE_UUID = "7A31-2026"
+ARCHIVE_MARKERS = ("Camera Trap Monitoring",)
+WTM_FAR_RE = re.compile(r"WTM_FAR", re.IGNORECASE)
+SEARCH_GLOBS = ("/media/{user}/*", "/mnt/*")
+
+# Memory: offer a swapfile if total swap is below this.
+MIN_TOTAL_SWAP_GIB = 16
+
+# Run parameter defaults. Threshold and maxlag follow the official DeepFaune
+# GUI (deepfauneGUI.py: 0.8 and 10), which differ from the demo script's
+# 0.5/20. The completed long run used 0.5/20; new shards use these.
+DEFAULTS = {
+    "detector": "DF",
+    "birds": True,
+    "threshold": 0.8,
+    "maxlag": 10,
+    "batch_size": 8,
+    "threads": 4,
+    "merge_every": 600,
+}
+
+DEFAULT_OUT_DIR = os.path.expanduser("~/df_out")
+DEFAULT_SOFTWARE_DIR = _HERE
+DESKTOP_DIR = os.path.expanduser("~/Desktop")
+CONFIG_PATH = os.path.expanduser("~/.config/dfrun/config.json")
+
+# Filenames inside the output directory.
+PIDFILE_NAME = "dfrun.worker.pid"
+CONSOLE_LOG_NAME = "dfrun.console.log"
+TOTAL_CACHE_NAME = ".dfrun_total_cache.json"
+MASTER_NAME = "master.csv"
+
+# Desktop output names (grouped by a common prefix).
+DESKTOP_MASTER = "deepfaune_master.csv"
+DESKTOP_WILDLIFE = "deepfaune_wildlife.csv"
+DESKTOP_SUMMARY = "deepfaune_summary.csv"
+
+# Excel's worksheet row limit (including the header row).
+EXCEL_ROW_LIMIT = 1_048_576
+
+# Labels excluded from "wildlife" and species tallies (English).
+NON_ANIMAL_LABELS = {"empty", "human", "vehicle", "undefined"}
+STATION_LEVELS = 2  # trailing path components used as a station key
+
+
+####################################################################################
+### SMALL JSON / CONFIG HELPERS
+####################################################################################
+def load_json(path, default=None):
+    """Load JSON from path, returning default on any error."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(path, data):
+    """Write JSON atomically; best-effort (errors are swallowed)."""
+    directory = os.path.dirname(path) or "."
+    try:
+        os.makedirs(directory, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def load_config():
+    return load_json(CONFIG_PATH, default={}) or {}
+
+
+def save_config(config):
+    save_json(CONFIG_PATH, config)
+
+
+####################################################################################
+### SELF-UPDATE (Stage 0): check and offer, fast-forward only, fail open
+####################################################################################
+def run_git(repo_dir, args, timeout=15):
+    """Run a git command in repo_dir, returning the CompletedProcess or None."""
+    try:
+        return subprocess.run(
+            ["git", "-C", repo_dir] + args,
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def git_fetch(repo_dir, remote=UPDATE_REMOTE, branch=UPDATE_BRANCH, timeout=5):
+    """Time-limited fetch. True on success, False on timeout/error/no network."""
+    result = run_git(repo_dir, ["fetch", remote, branch], timeout=timeout)
+    return bool(result and result.returncode == 0)
+
+
+def git_is_dirty(repo_dir):
+    """True if the working tree has uncommitted or untracked changes."""
+    result = run_git(repo_dir, ["status", "--porcelain"])
+    if result is None or result.returncode != 0:
+        return True  # cannot tell: treat as dirty and refuse to update
+    return bool(result.stdout.strip())
+
+
+def git_current_branch(repo_dir):
+    result = run_git(repo_dir, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if result is None or result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def git_rev(repo_dir, ref):
+    result = run_git(repo_dir, ["rev-parse", ref])
+    if result is None or result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def git_ff_possible(repo_dir, local_ref, remote_ref):
+    """True if local_ref is an ancestor of remote_ref (a fast-forward)."""
+    result = run_git(
+        repo_dir, ["merge-base", "--is-ancestor", local_ref, remote_ref]
+    )
+    return bool(result and result.returncode == 0)
+
+
+def git_behind_count(repo_dir, local_ref, remote_ref):
+    result = run_git(repo_dir, ["rev-list", "--count", f"{local_ref}..{remote_ref}"])
+    if result is None or result.returncode != 0:
+        return 0
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return 0
+
+
+def git_incoming_subjects(repo_dir, local_ref, remote_ref):
+    result = run_git(
+        repo_dir, ["log", "--oneline", f"{local_ref}..{remote_ref}"]
+    )
+    if result is None or result.returncode != 0:
+        return []
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def decide_update(fetch_ok, dirty, worker_running, on_branch, ff_possible, behind):
+    """Pure decision for the self-update check.
+
+    Returns (action, reason) where action is one of:
+      "skip"      remote unreachable; continue quietly,
+      "refuse"    a precondition failed; continue, printing the reason,
+      "current"   already up to date,
+      "update"    behind and fast-forwardable; offer to update.
+    """
+    if not fetch_ok:
+        return "skip", "remote unreachable"
+    if worker_running:
+        return "refuse", "a classification worker is running; not changing code under a live run"
+    if dirty:
+        return "refuse", "working tree has local changes; commit or restore first"
+    if not on_branch:
+        return "refuse", f"not on the {UPDATE_BRANCH} branch"
+    if not ff_possible:
+        return "refuse", "local branch has diverged; fast-forward not possible"
+    if behind <= 0:
+        return "current", "already up to date"
+    return "update", f"{behind} commits behind"
+
+
+def self_update_check(args, repo_dir, worker_is_running, prompt=None):
+    """Stage 0: check for a newer version and offer a fast-forward update.
+
+    Fails open: any problem prints a short line and returns without disrupting
+    the run. Returns True only if it has re-exec'd (it will not return then).
+    """
+    prompt = prompt or _default_prompt
+    if os.environ.get("DFRUN_UPDATED") == "1":
+        return False  # already re-exec'd once this launch; avoid loops
+    config = load_config()
+    preference = args.update_check or config.get("update_check") or "auto"
+    if preference == "never":
+        print("Update check disabled (update-check=never).")
+        return False
+    if args.no_update:
+        print("Update check skipped (--no-update).")
+        return False
+
+    fetch_ok = git_fetch(repo_dir)
+    local = git_rev(repo_dir, "HEAD")
+    remote = git_rev(repo_dir, f"{UPDATE_REMOTE}/{UPDATE_BRANCH}")
+    on_branch = git_current_branch(repo_dir) == UPDATE_BRANCH
+    ff = bool(local and remote and git_ff_possible(repo_dir, "HEAD", remote))
+    behind = git_behind_count(repo_dir, "HEAD", f"{UPDATE_REMOTE}/{UPDATE_BRANCH}") if fetch_ok else 0
+    dirty = git_is_dirty(repo_dir)
+
+    action, reason = decide_update(
+        fetch_ok, dirty, worker_is_running, on_branch, ff, behind
+    )
+    if action == "skip":
+        print("Update check skipped: remote unreachable.")
+        return False
+    if action == "refuse":
+        print(f"Update available but not applied: {reason}.")
+        return False
+    if action == "current":
+        print("Up to date.")
+        return False
+
+    # action == "update"
+    print(f"A newer version is available ({behind} commits):")
+    for subject in git_incoming_subjects(repo_dir, "HEAD", remote):
+        print(f"  {subject}")
+    answer = prompt(f"Update now? [y/N] ")
+    if answer.strip().lower() not in ("y", "yes"):
+        print("Update declined; continuing on the current version.")
+        return False
+
+    old_hash = local
+    result = run_git(repo_dir, ["pull", "--ff-only", UPDATE_REMOTE, UPDATE_BRANCH], timeout=60)
+    if result is None or result.returncode != 0:
+        msg = (result.stderr.strip() if result else "git pull failed")
+        print(f"Update failed, keeping the current version: {msg}")
+        return False
+    new_hash = git_rev(repo_dir, "HEAD")
+    print(f"Updated {old_hash[:10]} -> {new_hash[:10]}.")
+    print(f"To roll back: git reset --hard {old_hash}")
+    # Re-exec so the new code takes effect, passing through the original args.
+    os.environ["DFRUN_UPDATED"] = "1"
+    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
+    return True  # not reached
+
+
+def _default_prompt(message):
+    try:
+        return input(message)
+    except EOFError:
+        return ""
+
+
+####################################################################################
+### DRIVE DETECTION (Stage 2)
+####################################################################################
+def looks_like_archive(path):
+    """True if path looks like the camera-trap archive root.
+
+    It is the archive if it directly contains a marker directory (for example
+    "Camera Trap Monitoring") or any directory whose name matches the WTM_FAR
+    pattern.
+    """
+    try:
+        entries = os.listdir(path)
+    except OSError:
+        return False
+    for name in entries:
+        if name in ARCHIVE_MARKERS or WTM_FAR_RE.search(name):
+            if os.path.isdir(os.path.join(path, name)):
+                return True
+    return False
+
+
+def candidate_mount_dirs(user=None):
+    """Expand the search globs to existing directories to inspect."""
+    import glob
+    user = user or os.environ.get("USER") or ""
+    dirs = []
+    for pattern in SEARCH_GLOBS:
+        for path in glob.glob(pattern.format(user=user)):
+            if os.path.isdir(path):
+                dirs.append(path)
+    return sorted(set(dirs))
+
+
+def find_archive_candidates(user=None):
+    """Return mounted directories that look like the camera archive."""
+    return [d for d in candidate_mount_dirs(user) if looks_like_archive(d)]
+
+
+def path_device_uuid(path):
+    """Best-effort exFAT/filesystem UUID for the device backing path.
+
+    Resolves the mount source via findmnt, then maps it to a UUID via the
+    /dev/disk/by-uuid symlinks. Returns None if it cannot be determined.
+    """
+    try:
+        result = subprocess.run(
+            ["findmnt", "-no", "SOURCE", "--target", path],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    source = result.stdout.strip()
+    if not source:
+        return None
+    by_uuid = "/dev/disk/by-uuid"
+    try:
+        for uuid in os.listdir(by_uuid):
+            if os.path.realpath(os.path.join(by_uuid, uuid)) == os.path.realpath(source):
+                return uuid
+    except OSError:
+        return None
+    return None
+
+
+def mount_options(path):
+    """Return the mount option string for the filesystem holding path, or ''."""
+    try:
+        result = subprocess.run(
+            ["findmnt", "-no", "OPTIONS", "--target", path],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def is_read_only(options):
+    """True if a mount option string indicates a read-only mount."""
+    tokens = [tok.strip() for tok in options.split(",")]
+    return "ro" in tokens
+
+
+####################################################################################
+### WORK ASSESSMENT (Stage 3) AND CACHE
+####################################################################################
+def cache_path(out_dir):
+    return os.path.join(out_dir, TOTAL_CACHE_NAME)
+
+
+def load_total_cache(out_dir, source, drive_uuid):
+    """Return a cached (total, shards) if valid for this drive and root, else None.
+
+    The cache records the drive UUID and root and is invalidated if either
+    differs, so a changed drive cannot silently reuse a stale count.
+    """
+    data = load_json(cache_path(out_dir))
+    if not data:
+        return None
+    if data.get("uuid") != drive_uuid or data.get("root") != os.path.abspath(source):
+        return None
+    if "total" not in data or "shards" not in data:
+        return None
+    return data["total"], data["shards"]
+
+
+def save_total_cache(out_dir, source, drive_uuid, total, shards):
+    save_json(cache_path(out_dir), {
+        "uuid": drive_uuid,
+        "root": os.path.abspath(source),
+        "total": total,
+        "shards": shards,
+    })
+
+
+def count_total_images(source):
+    """Total images and shard count on the drive (the expensive scan)."""
+    shards = dfb.find_shards(source)
+    total = sum(len(imgs) for _, imgs in shards)
+    return total, len(shards)
+
+
+def get_total_count(out_dir, source, drive_uuid, rescan):
+    """Return (total, shards, from_cache), using the cache unless rescan is set."""
+    if not rescan:
+        cached = load_total_cache(out_dir, source, drive_uuid)
+        if cached is not None:
+            return cached[0], cached[1], True
+    total, shards = count_total_images(source)
+    save_total_cache(out_dir, source, drive_uuid, total, shards)
+    return total, shards, False
+
+
+def assess_work(out_dir, source, drive_uuid, rescan):
+    """Return (done, remaining, total, shards, pct, from_cache)."""
+    done = dfb.count_classified_images(out_dir)
+    total, shards, from_cache = get_total_count(out_dir, source, drive_uuid, rescan)
+    remaining = max(0, total - done)
+    pct = (100.0 * done / total) if total else 0.0
+    return done, remaining, total, shards, pct, from_cache
+
+
+####################################################################################
+### MEMORY / SWAP (A7, Stage 4)
+####################################################################################
+def gib(n_bytes):
+    return n_bytes / (1024 ** 3)
+
+
+def needs_swap(total_swap_bytes, minimum_gib=MIN_TOTAL_SWAP_GIB):
+    """True if total swap is below the recommended minimum."""
+    return gib(total_swap_bytes) < minimum_gib
+
+
+def current_swap_total_bytes():
+    try:
+        import psutil
+    except ImportError:
+        return 0
+    return psutil.swap_memory().total
+
+
+def create_swapfile(size_gib, path="/swapfile", runner=None):
+    """Create and enable a swapfile via sudo. Returns True on success.
+
+    Each step needs root; the user is prompted for sudo by the system. Any
+    failure returns False so the caller can continue without swap.
+    """
+    runner = runner or (lambda cmd: subprocess.run(cmd).returncode == 0)
+    steps = [
+        ["sudo", "fallocate", "-l", f"{size_gib}G", path],
+        ["sudo", "chmod", "600", path],
+        ["sudo", "mkswap", path],
+        ["sudo", "swapon", path],
+    ]
+    for cmd in steps:
+        try:
+            if not runner(cmd):
+                return False
+        except (OSError, subprocess.SubprocessError):
+            return False
+    return True
+
+
+####################################################################################
+### SINGLE INSTANCE (A10) AND DETACHED LAUNCH (A8)
+####################################################################################
+def pidfile_path(out_dir):
+    return os.path.join(out_dir, PIDFILE_NAME)
+
+
+def read_pidfile(out_dir):
+    try:
+        with open(pidfile_path(out_dir), encoding="utf-8") as handle:
+            return int(handle.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def write_pidfile(out_dir, pid):
+    save_text(pidfile_path(out_dir), f"{pid}\n")
+
+
+def save_text(path, text):
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    os.replace(tmp, path)
+
+
+def process_is_worker(pid):
+    """True if pid is a live deepfaune_batch worker (not just any process).
+
+    Relies on the command line rather than the process name, so counting worker
+    threads in htop cannot raise a false duplicate-run alarm.
+    """
+    if pid is None:
+        return False
+    try:
+        import psutil
+        try:
+            proc = psutil.Process(pid)
+            return any("deepfaune_batch" in part for part in proc.cmdline())
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return False
+    except ImportError:
+        pass
+    # Fallback without psutil: read /proc/<pid>/cmdline.
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            return b"deepfaune_batch" in handle.read()
+    except OSError:
+        return False
+
+
+def worker_running(out_dir):
+    """True if the worker recorded in the pidfile is alive."""
+    return process_is_worker(read_pidfile(out_dir))
+
+
+def build_worker_command(software_dir, source, out_dir, params):
+    cmd = [
+        sys.executable,
+        os.path.join(software_dir, "deepfaune_batch.py"),
+        "--software-dir", software_dir,
+        "--root", source,
+        "--out-dir", out_dir,
+        "--detector", params["detector"],
+        "--threshold", str(params["threshold"]),
+        "--maxlag", str(params["maxlag"]),
+        "--batch-size", str(params["batch_size"]),
+        "--threads", str(params["threads"]),
+        "--heartbeat-secs", "30",
+        "--merge-every", str(params["merge_every"]),
+    ]
+    if params.get("birds", True):
+        cmd.append("--birds")
+    return cmd
+
+
+def launch_detached(software_dir, source, out_dir, params):
+    """Launch the worker fully detached from the terminal and editor session.
+
+    start_new_session=True calls setsid, so the worker lives in its own session
+    and is not killed when the SSH or VS Code connection drops. Its stdio is
+    redirected to a console log, and the orchestrator keeps writing its own
+    detailed log unchanged.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    cmd = build_worker_command(software_dir, source, out_dir, params)
+    console = open(os.path.join(out_dir, CONSOLE_LOG_NAME), "ab")
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=console,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        cwd=software_dir,
+    )
+    write_pidfile(out_dir, proc.pid)
+    return proc.pid
+
+
+####################################################################################
+### STATISTICS FROM SHARD CSVs (Stage 6, A11)
+####################################################################################
+def station_from_path(path, levels=STATION_LEVELS):
+    """Station key: the last `levels` directory components of an image path."""
+    directory = os.path.dirname(str(path)).replace("\\", "/")
+    parts = [p for p in directory.split("/") if p]
+    if not parts:
+        return "(unknown)"
+    return "/".join(parts[-levels:])
+
+
+def is_excluded_label(label):
+    low = label.strip().lower()
+    if low in NON_ANIMAL_LABELS:
+        return True
+    return low.endswith("undefined")  # for example "bird undefined"
+
+
+class StatsAccumulator:
+    """Incrementally tallies species, blanks and stations from shard CSVs.
+
+    Each shard CSV is written once and never modified, so counting it once is
+    correct. Already-counted files are tracked so the master is never re-read in
+    full. Non-survey artefacts are handled: unset-clock (1970) timestamps are
+    flagged, and excluded labels are kept out of the species tally.
+    """
+
+    def __init__(self):
+        self.counted = set()
+        self.species = Counter()
+        self.by_station = Counter()
+        self.total = 0
+        self.empty = 0
+        self.unset_clock = 0
+
+    def consume_new(self, out_dir):
+        for path in dfb.iter_shard_csvs(out_dir):
+            name = os.path.basename(path)
+            if name in self.counted:
+                continue
+            try:
+                self._consume_file(path)
+            except OSError:
+                continue  # mid-rotation or unreadable: retry next tick
+            self.counted.add(name)
+
+    def _consume_file(self, path):
+        with open(path, newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                self.total += 1
+                label = (row.get("prediction_seq") or "").strip()
+                low = label.lower()
+                if (row.get("date") or "").startswith("1970"):
+                    self.unset_clock += 1
+                if low == "empty":
+                    self.empty += 1
+                elif label and not is_excluded_label(label):
+                    self.species[label] += 1
+                    self.by_station[station_from_path(row.get("filename", ""))] += 1
+
+    def top_species(self, n=5):
+        return self.species.most_common(n)
+
+    def blank_pct(self):
+        return (100.0 * self.empty / self.total) if self.total else 0.0
+
+
+####################################################################################
+### COMPLETION OUTPUTS (Stage 7)
+####################################################################################
+def copy_file(src, dst):
+    """Copy src to dst atomically (temp then rename). Best-effort."""
+    try:
+        os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+        tmp = dst + ".tmp"
+        with open(src, "rb") as fin, open(tmp, "wb") as fout:
+            while True:
+                chunk = fin.read(1024 * 1024)
+                if not chunk:
+                    break
+                fout.write(chunk)
+        os.replace(tmp, dst)
+        return True
+    except OSError:
+        return False
+
+
+def write_wildlife_and_summary(out_dir, desktop_dir):
+    """Write the spreadsheet-friendly wildlife and summary CSVs to the Desktop.
+
+    Reads the shard CSVs (the source of truth) once. The wildlife file holds
+    only actual animals (excludes empty, human and vehicle) and is capped at
+    Excel's row limit. The summary file holds per-species and per-station counts.
+    Returns (wildlife_rows, capped, species_count, station_count).
+    """
+    os.makedirs(desktop_dir, exist_ok=True)
+    species = Counter()
+    stations = Counter()
+    wildlife_path = os.path.join(desktop_dir, DESKTOP_WILDLIFE)
+    capped = False
+    written = 0
+    tmp = wildlife_path + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as out:
+        writer = csv.writer(out)
+        writer.writerow(dfb.CSV_HEADER + ["station"])
+        for path in dfb.iter_shard_csvs(out_dir):
+            try:
+                handle = open(path, newline="", encoding="utf-8")
+            except OSError:
+                continue
+            with handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    label = (row.get("prediction_seq") or "").strip()
+                    low = label.lower()
+                    if low in {"empty", "human", "vehicle"} or not label:
+                        continue
+                    station = station_from_path(row.get("filename", ""))
+                    species[label] += 1
+                    stations[station] += 1
+                    if written < EXCEL_ROW_LIMIT - 1:
+                        writer.writerow(
+                            [row.get(col, "") for col in dfb.CSV_HEADER] + [station]
+                        )
+                        written += 1
+                    else:
+                        capped = True
+    os.replace(tmp, wildlife_path)
+
+    summary_path = os.path.join(desktop_dir, DESKTOP_SUMMARY)
+    tmp = summary_path + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as out:
+        writer = csv.writer(out)
+        writer.writerow(["group", "name", "count"])
+        for name, count in species.most_common():
+            writer.writerow(["species", name, count])
+        for name, count in stations.most_common():
+            writer.writerow(["station", name, count])
+    os.replace(tmp, summary_path)
+    return written, capped, len(species), len(stations)
+
+
+####################################################################################
+### TIME / FORMAT HELPERS
+####################################################################################
+def absolute_eta(eta_seconds, now=None):
+    """Format an absolute finish time, for example 'finishes Fri 27 Jun, 03:14'."""
+    if not eta_seconds or eta_seconds <= 0:
+        return "finishes: unknown"
+    now = now or datetime.now()
+    finish = now + timedelta(seconds=eta_seconds)
+    return "finishes " + finish.strftime("%a %d %b, %H:%M")
+
+
+def status_path(out_dir, partition=0):
+    return os.path.join(out_dir, f"status.p{partition}.json")
+
+
+def read_status(out_dir, partition=0):
+    return load_json(status_path(out_dir, partition))
+
+
+####################################################################################
+### STAGES
+####################################################################################
+def stage_banner():
+    line = "=" * 70
+    print(line)
+    print(f" {TOOL_NAME} v{TOOL_VERSION}  -  DeepFaune camera-trap batch runner")
+    print(f" {GITHUB_URL}")
+    print(f" {CONTACT}")
+    print(line)
+
+
+def stage_find_source(args):
+    """Stage 2: find and confirm the source drive. Returns (source, uuid) or None."""
+    candidates = []
+    if args.source:
+        candidates = [args.source]
+    else:
+        candidates = find_archive_candidates()
+    chosen = None
+    if candidates:
+        print("Found candidate archive location(s):")
+        for path in candidates:
+            uuid = path_device_uuid(path)
+            tag = " (UUID matches)" if uuid == EXPECTED_DRIVE_UUID else ""
+            print(f"  {path}{tag}")
+        chosen = candidates[0]
+    else:
+        print("No archive auto-detected under /media or /mnt.")
+    if not args.yes:
+        reply = _default_prompt(
+            f"Use [{chosen or 'enter a path'}]? Press Enter to accept or type a path: "
+        ).strip()
+        if reply:
+            chosen = reply
+    if not chosen or not os.path.isdir(chosen):
+        print(f"Source not usable: {chosen!r}")
+        return None
+    options = mount_options(chosen)
+    if not is_read_only(options):
+        print(
+            f"WARNING: {chosen} is not mounted read-only (options: {options or 'unknown'}). "
+            "Remount read-only to protect the archive, for example:\n"
+            f"  sudo mount -o remount,ro \"$(findmnt -no TARGET --target '{chosen}')\""
+        )
+        if not args.yes and _default_prompt("Continue anyway? [y/N] ").strip().lower() not in ("y", "yes"):
+            return None
+    uuid = path_device_uuid(chosen)
+    if uuid and uuid != EXPECTED_DRIVE_UUID:
+        print(f"Note: drive UUID {uuid} differs from the expected {EXPECTED_DRIVE_UUID}.")
+    return chosen, uuid
+
+
+def stage_assess(out_dir, source, uuid, rescan):
+    """Stage 3: report done/remaining/total with the true percentage."""
+    print("Assessing work (this can take a while the first time)...")
+    done, remaining, total, shards, pct, from_cache = assess_work(
+        out_dir, source, uuid, rescan
+    )
+    src = "cached" if from_cache else "freshly counted"
+    print(f"  Already classified: {done:,}")
+    print(f"  Remaining:          {remaining:,}")
+    print(f"  Total on drive:     {total:,} in {shards:,} shards ({src})")
+    print(f"  Done:               {pct:.1f}%")
+    return done, remaining, total
+
+
+def stage_configure(args, out_dir):
+    """Stage 4: show parameters and let the user confirm or change them."""
+    params = {
+        "detector": args.detector,
+        "birds": args.birds,
+        "threshold": args.threshold,
+        "maxlag": args.maxlag,
+        "batch_size": args.batch_size,
+        "threads": args.threads,
+        "merge_every": args.merge_every,
+    }
+    # Warn if a previous run used different threshold/maxlag (mixed dataset).
+    previous = read_status(out_dir) or load_json(
+        os.path.join(out_dir, "run_metadata.p0.json")
+    )
+    if previous:
+        prev_t = previous.get("threshold")
+        prev_l = previous.get("maxlag")
+        if prev_t is not None and (prev_t != params["threshold"] or prev_l != params["maxlag"]):
+            print(
+                f"NOTE: a previous run used threshold {prev_t} / maxlag {prev_l}; "
+                f"this run uses {params['threshold']} / {params['maxlag']}. "
+                "Completed shards keep their old values (mixed dataset)."
+            )
+    print("Run parameters:")
+    for key in ("detector", "birds", "threshold", "maxlag", "batch_size", "threads", "merge_every"):
+        print(f"  {key:12s} {params[key]}")
+    if not args.yes:
+        reply = _default_prompt(
+            f"Threads [{params['threads']}]: Enter to keep, or type a new count: "
+        ).strip()
+        if reply:
+            try:
+                params["threads"] = max(1, int(reply))
+            except ValueError:
+                print(f"Not a number; keeping {params['threads']} threads.")
+        if _default_prompt("Proceed with these settings? [Y/n] ").strip().lower() in ("n", "no"):
+            print("Aborted by user before launch.")
+            return None
+    return params
+
+
+def stage_swap(args):
+    """Stage 4 (swap): check total swap and offer to create a swapfile."""
+    total = current_swap_total_bytes()
+    print(f"Swap total: {gib(total):.1f} GiB")
+    # Non-interactive override by flag (sizes the swapfile up or down).
+    if args.swap_gib is not None:
+        if args.swap_gib <= 0:
+            print("Skipping swapfile creation (--swap-gib <= 0).")
+            return
+        print(f"Creating a {args.swap_gib} GiB swapfile (requires sudo)...")
+        if create_swapfile(args.swap_gib):
+            print("Swapfile created and enabled. Add it to /etc/fstab to persist.")
+        else:
+            print("Swapfile creation did not complete; continuing without it.")
+        return
+    if not needs_swap(total):
+        return
+    print(
+        f"Swap is below the recommended {MIN_TOTAL_SWAP_GIB} GiB. A swapfile guards "
+        "against the out-of-memory killer on this 16 GiB box."
+    )
+    if args.yes:
+        return  # non-interactive: do not touch system swap without consent
+    reply = _default_prompt(
+        "Create a swapfile now? Enter size in GiB (for example 16), or Enter to skip: "
+    ).strip()
+    if not reply:
+        return
+    try:
+        size = int(reply)
+    except ValueError:
+        print("Not a number; skipping swap creation.")
+        return
+    print(f"Creating a {size} GiB swapfile (requires sudo)...")
+    if create_swapfile(size):
+        print("Swapfile created and enabled. To persist across reboots, add it to /etc/fstab.")
+    else:
+        print("Swapfile creation did not complete; continuing without it.")
+
+
+####################################################################################
+### LIVE READOUT (Stage 6)
+####################################################################################
+def system_info():
+    """CPU load and temperature, available RAM and swap used. Best-effort."""
+    info = {"cpu_pct": None, "cpu_temp": None, "mem_avail": None, "swap_used": None}
+    try:
+        import psutil
+    except ImportError:
+        return info
+    try:
+        info["cpu_pct"] = psutil.cpu_percent(interval=None)
+        info["mem_avail"] = psutil.virtual_memory().available  # MemAvailable
+        info["swap_used"] = psutil.swap_memory().used
+        temps = psutil.sensors_temperatures() or {}
+        for key in ("coretemp", "k10temp", "acpitz"):
+            if key in temps and temps[key]:
+                info["cpu_temp"] = temps[key][0].current
+                break
+    except Exception:
+        pass
+    return info
+
+
+def render_readout(out_dir, stats, status, sysinfo):
+    """Build the rich panel for the live readout."""
+    from rich.table import Table
+    from rich.panel import Panel
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(justify="right", style="bold")
+    table.add_column()
+
+    status = status or {}
+    total = status.get("archive_total")
+    done = status.get("true_done")
+    pct = status.get("true_pct")
+    if total:
+        table.add_row("Classified", f"{done:,} / {total:,}  ({pct:.1f}%)")
+    else:
+        table.add_row("Classified", "starting...")
+    table.add_row("Blanks", f"{stats.blank_pct():.1f}% empty")
+    top = stats.top_species()
+    if top:
+        table.add_row("Top species", ", ".join(f"{name} ({n})" for name, n in top))
+    else:
+        table.add_row("Top species", "none yet")
+    table.add_row("ETA", absolute_eta(status.get("eta_seconds")))
+    table.add_row("Rate", f"{status.get('rate_img_per_s', 0):.2f} img/s")
+    table.add_row("Current shard", status.get("current_shard") or "-")
+    if status.get("skipped_unreadable"):
+        table.add_row("Skipped (unreadable)", str(status["skipped_unreadable"]))
+    if stats.unset_clock:
+        table.add_row("Unset-clock (1970)", str(stats.unset_clock))
+
+    cpu = sysinfo.get("cpu_pct")
+    temp = sysinfo.get("cpu_temp")
+    cpu_str = f"{cpu:.0f}%" if cpu is not None else "n/a"
+    temp_str = f"{temp:.0f} C" if temp is not None else "n/a"
+    table.add_row("CPU", f"{cpu_str}  /  {temp_str}")
+    mem = sysinfo.get("mem_avail")
+    swp = sysinfo.get("swap_used")
+    mem_str = f"{gib(mem):.1f} GiB avail" if mem is not None else "n/a"
+    swp_str = f"{gib(swp):.1f} GiB used" if swp is not None else "n/a"
+    table.add_row("Memory", f"RAM {mem_str}  /  swap {swp_str}")
+
+    start = status.get("start_time_unix")
+    if start:
+        elapsed = dfb.format_duration(time.time() - start)
+        table.add_row("Elapsed", elapsed)
+    state = status.get("state", "?")
+    return Panel(table, title=f"{TOOL_NAME}: {state}", border_style="green")
+
+
+def live_readout(out_dir, refresh_secs=3):
+    """Stage 6: render the live panel until the worker exits or the user detaches.
+
+    Closing the readout (Ctrl-C) does not stop the worker; re-running the tool
+    reattaches. The master.csv copy on the Desktop is refreshed whenever it
+    changes. Returns the final status dict.
+    """
+    try:
+        from rich.live import Live
+    except ImportError:
+        return _plain_readout(out_dir, refresh_secs)
+    stats = StatsAccumulator()
+    last_master_mtime = None
+    final_status = None
+    try:
+        with Live(refresh_per_second=4, screen=False) as live:
+            while True:
+                stats.consume_new(out_dir)
+                status = read_status(out_dir) or {}
+                final_status = status or final_status
+                live.update(render_readout(out_dir, stats, status, system_info()))
+                last_master_mtime = _refresh_desktop_master(out_dir, last_master_mtime)
+                state = status.get("state")
+                if state in ("finished", "stopped") and not worker_running(out_dir):
+                    break
+                if status and not worker_running(out_dir) and state not in ("finished", "stopped"):
+                    # Worker vanished without a clean final status.
+                    break
+                time.sleep(refresh_secs)
+    except KeyboardInterrupt:
+        print("\nDetached from the readout; the worker keeps running.")
+        print(f"Re-run {TOOL_NAME} to reattach.")
+    return final_status
+
+
+def _plain_readout(out_dir, refresh_secs):
+    """Fallback readout without rich: periodic one-line status."""
+    stats = StatsAccumulator()
+    final_status = None
+    try:
+        while True:
+            stats.consume_new(out_dir)
+            status = read_status(out_dir) or {}
+            final_status = status or final_status
+            if status.get("archive_total"):
+                print(
+                    f"{status.get('true_done', 0):,}/{status['archive_total']:,} "
+                    f"({status.get('true_pct', 0):.1f}%) | "
+                    f"blanks {stats.blank_pct():.1f}% | {absolute_eta(status.get('eta_seconds'))}"
+                )
+            if status.get("state") in ("finished", "stopped") and not worker_running(out_dir):
+                break
+            time.sleep(refresh_secs)
+    except KeyboardInterrupt:
+        print(f"\nDetached; worker keeps running. Re-run {TOOL_NAME} to reattach.")
+    return final_status
+
+
+def _refresh_desktop_master(out_dir, last_mtime):
+    master = os.path.join(out_dir, MASTER_NAME)
+    try:
+        mtime = os.path.getmtime(master)
+    except OSError:
+        return last_mtime
+    if mtime != last_mtime:
+        copy_file(master, os.path.join(DESKTOP_DIR, DESKTOP_MASTER))
+    return mtime
+
+
+####################################################################################
+### MAIN
+####################################################################################
+def build_arg_parser():
+    parser = argparse.ArgumentParser(
+        prog=TOOL_NAME,
+        description="Friendly front end for the DeepFaune batch orchestrator.",
+    )
+    parser.add_argument("--source", help="Path to the camera archive root (default: auto-detect).")
+    parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help=f"Output directory (default: {DEFAULT_OUT_DIR}).")
+    parser.add_argument("--software-dir", default=DEFAULT_SOFTWARE_DIR, help="DeepFaune source and weights directory.")
+    parser.add_argument("--detector", default=DEFAULTS["detector"], choices=dfb.DETECTOR_CHOICES)
+    parser.add_argument("--threshold", type=float, default=DEFAULTS["threshold"])
+    parser.add_argument("--maxlag", type=int, default=DEFAULTS["maxlag"])
+    parser.add_argument("--batch-size", type=int, default=DEFAULTS["batch_size"])
+    parser.add_argument("--threads", type=int, default=DEFAULTS["threads"])
+    parser.add_argument("--swap-gib", type=int, default=None,
+                        help="Create a swapfile of this many GiB before launch (needs sudo).")
+    parser.add_argument("--merge-every", type=int, default=DEFAULTS["merge_every"])
+    birds = parser.add_mutually_exclusive_group()
+    birds.add_argument("--birds", dest="birds", action="store_true", default=DEFAULTS["birds"])
+    birds.add_argument("--no-birds", dest="birds", action="store_false")
+    parser.add_argument("--rescan", action="store_true", help="Force a fresh total count, ignoring the cache.")
+    parser.add_argument("--yes", action="store_true", help="Accept defaults without prompting (non-interactive).")
+    parser.add_argument("--attach", action="store_true", help="Attach to the live readout of a running worker and exit.")
+    parser.add_argument("--no-update", action="store_true", help="Skip the self-update check this launch.")
+    parser.add_argument("--update-check", choices=("auto", "never"), default=None,
+                        help="Persist the update-check preference (auto or never; default: auto).")
+    parser.add_argument("--watchdog", action="store_true",
+                        help="Auto-resume the worker if it exits with work remaining (bounded retries).")
+    parser.add_argument("--max-retries", type=int, default=3, help="Watchdog retry cap (default: 3).")
+    return parser
+
+
+def main(argv=None):
+    args = build_arg_parser().parse_args(argv)
+    out_dir = os.path.abspath(args.out_dir)
+    software_dir = os.path.abspath(args.software_dir)
+
+    # Persist the update-check preference if the user set it explicitly.
+    if args.update_check is not None:
+        config = load_config()
+        config["update_check"] = args.update_check
+        save_config(config)
+
+    stage_banner()
+
+    # Stage 0: self-update (before any work). Never under a live worker.
+    self_update_check(args, _HERE, worker_running(out_dir))
+
+    # Attach mode: just show the readout of a running worker.
+    if args.attach:
+        if not worker_running(out_dir):
+            print("No running worker to attach to.")
+            return 1
+        live_readout(out_dir)
+        return 0
+
+    # Single instance (A10): if a worker is already running, reattach.
+    if worker_running(out_dir):
+        print("A worker is already running; attaching to its live readout.")
+        live_readout(out_dir)
+        return 0
+
+    found = stage_find_source(args)
+    if not found:
+        return 1
+    source, uuid = found
+
+    stage_assess(out_dir, source, uuid, args.rescan)
+    params = stage_configure(args, out_dir)
+    if params is None:
+        return 1
+    stage_swap(args)
+
+    print("Launching the classifier, detached...")
+    supervise(software_dir, source, out_dir, params, args)
+    return 0
+
+
+def supervise(software_dir, source, out_dir, params, args):
+    """Launch the worker, show the readout, and optionally auto-resume.
+
+    With --watchdog, if the worker exits with work remaining while the drive is
+    still present, the run is resumed up to --max-retries times, each logged. A
+    user detaching (the worker stays alive) is never treated as a failure.
+    """
+    retries = 0
+    while True:
+        pid = launch_detached(software_dir, source, out_dir, params)
+        print(
+            f"Worker PID {pid}. Detailed log: "
+            f"{os.path.join(out_dir, 'deepfaune_batch.p0.log')}"
+        )
+        print("You can close this window or disconnect; the run continues.")
+        final = live_readout(out_dir)
+        if worker_running(out_dir):
+            print("Detached; the worker is still running. Re-run dfrun to reattach.")
+            return
+        state = (final or {}).get("state")
+        if state == "finished":
+            finish_outputs(out_dir)
+            return
+        if (args.watchdog and retries < args.max_retries
+                and os.path.isdir(source) and looks_like_archive(source)):
+            done = dfb.count_classified_images(out_dir)
+            total = (final or {}).get("archive_total") or 0
+            if total and done < total:
+                retries += 1
+                print(
+                    f"Watchdog: worker stopped with work remaining; resuming "
+                    f"(attempt {retries}/{args.max_retries})..."
+                )
+                continue
+        print("Worker stopped early. Re-run the tool to resume from where it left off.")
+        return
+
+
+def finish_outputs(out_dir):
+    """Stage 7: copy the master and write spreadsheet-friendly files to Desktop."""
+    print("Run finished. Writing spreadsheet-friendly outputs to the Desktop...")
+    master = os.path.join(out_dir, MASTER_NAME)
+    if not os.path.exists(master):
+        dfb.merge_csvs(out_dir, master)
+    copy_file(master, os.path.join(DESKTOP_DIR, DESKTOP_MASTER))
+    rows, capped, n_species, n_stations = write_wildlife_and_summary(out_dir, DESKTOP_DIR)
+    print(f"  {DESKTOP_MASTER}: full master (exceeds Excel's row limit; not spreadsheet-friendly)")
+    print(f"  {DESKTOP_WILDLIFE}: {rows:,} wildlife rows" + (" (capped to Excel's limit)" if capped else ""))
+    print(f"  {DESKTOP_SUMMARY}: {n_species} species, {n_stations} stations")
+    print("Open the wildlife and summary files in a spreadsheet; the master is for tools that handle large CSVs.")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

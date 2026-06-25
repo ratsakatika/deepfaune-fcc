@@ -242,12 +242,96 @@ def test_format_duration():
     assert dfb.format_duration(-5) == "0:00:00"  # clamped
 
 
-def test_progress_summary_runs():
-    progress = dfb.Progress(100)
-    progress.add(25)
+def test_progress_true_overall_and_summary():
+    # Archive of 100 images, 25 classified in earlier sessions.
+    progress = dfb.Progress(archive_total=100, done_start=25)
+    assert progress.true_done == 25
+    progress.complete_shard(25)  # 25 more this session
+    assert progress.true_done == 50
+    assert progress.true_pct() == 50.0
     summary = progress.summary()
-    assert "25/100" in summary
+    assert "50/100" in summary
     assert "ETA" in summary
+
+
+def test_progress_true_pct_capped_at_100():
+    # A stale over-count (more classified than the recomputed archive total)
+    # must not report above 100 per cent.
+    progress = dfb.Progress(archive_total=10, done_start=12)
+    assert progress.true_pct() == 100.0
+
+
+def test_rate_tracker_smooths_over_window():
+    tracker = dfb.RateTracker(window_seconds=100)
+    tracker.update(0, now=0.0)
+    tracker.update(100, now=10.0)  # 100 images in 10 s
+    assert abs(tracker.rate() - 10.0) < 1e-9
+    # A single sample cannot give a rate.
+    assert dfb.RateTracker().rate() == 0.0
+
+
+# ---------------------------------------------------------------------------
+# shard-pattern and system-folder helpers
+# ---------------------------------------------------------------------------
+def test_is_shard_csv():
+    assert dfb.is_shard_csv("siteA__cam1__0a1b2c3d.csv")
+    assert dfb.is_shard_csv("/path/to/x__deadbeef.csv")
+    assert not dfb.is_shard_csv("master.csv")
+    assert not dfb.is_shard_csv("summary.csv")
+    assert not dfb.is_shard_csv("shard__0a1b2c3d.csv.tmp")
+    assert not dfb.is_shard_csv("x__short.csv")  # not 8 hex chars
+
+
+def test_is_system_dir():
+    assert dfb.is_system_dir("$RECYCLE.BIN")
+    assert dfb.is_system_dir("System Volume Information")
+    assert dfb.is_system_dir("FOUND.000")
+    assert not dfb.is_system_dir("Camera Trap Monitoring")
+
+
+def test_find_shards_excludes_system_dirs(tmp_path):
+    _touch(tmp_path / "$RECYCLE.BIN" / "junk.jpg")
+    _touch(tmp_path / "System Volume Information" / "junk.jpg")
+    _touch(tmp_path / "FOUND.000" / "junk.jpg")
+    _touch(tmp_path / "cam1" / "real.jpg")
+    rels = {os.path.relpath(d, str(tmp_path)) for d, _ in dfb.find_shards(str(tmp_path))}
+    assert rels == {"cam1"}
+
+
+def test_count_classified_images(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    _write_shard_csv(
+        out / "a__0a1b2c3d.csv",
+        [["/a/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0]],
+    )
+    _write_shard_csv(
+        out / "b__1a2b3c4d.csv",
+        [["/b/1.jpg", "d", 1, "lynx", 0.8, "lynx", 0.8, 1, 0],
+         ["/b/2.jpg", "d", 1, "empty", 1.0, "empty", 1.0, 0, 0]],
+    )
+    # Non-shard files must not be counted.
+    (out / "master.csv").write_text("filename\nx\n", encoding="utf-8")
+    assert dfb.count_classified_images(str(out)) == 3
+
+
+def test_validate_common_threads():
+    assert dfb.validate_common(_args(threads=0)) is not None
+    assert dfb.validate_common(_args(threads=1)) is None
+
+
+def test_official_defaults_are_used():
+    # Locks the decision to follow the official DeepFaune GUI defaults.
+    args = dfb.build_arg_parser().parse_args(["--out-dir", "/tmp/unused"])
+    assert args.threshold == 0.8
+    assert args.maxlag == 10
+    assert args.threads == 4
+
+
+def test_dry_run_and_merge_mutually_exclusive(tmp_path, capsys):
+    rc = dfb.main(["--out-dir", str(tmp_path), "--dry-run", "--merge"])
+    assert rc == 2
+    assert "mutually exclusive" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -335,16 +419,18 @@ def test_merge_csvs_header_once_quoting_and_ignores_decoys(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
     _write_shard_csv(
-        out / "shardA__a.csv",
+        out / "shardA__0a1b2c3d.csv",
         [["/a/1.jpg", "d", 1, "wolf, grey", 0.9, "wolf", 0.9, 1, 0]],
     )
     _write_shard_csv(
-        out / "shardB__b.csv",
+        out / "shardB__1a2b3c4d.csv",
         [["/b/2.jpg", "d", 1, "lynx", 0.8, "lynx", 0.8, 1, 0]],
     )
-    # Decoys that must be ignored by the "*.csv" glob / exclusions.
+    # Decoys that must be ignored: temp file, JSON sidecar, and a non-shard CSV
+    # (master/summary files do not match the shard-name pattern).
     (out / "partial.csv.tmp").write_text("garbage\n", encoding="utf-8")
     (out / "run_metadata.p0.json").write_text("{}", encoding="utf-8")
+    (out / "summary.csv").write_text("not,a,shard\n", encoding="utf-8")
 
     merge_out = out / "master.csv"
     n_files, n_rows = dfb.merge_csvs(str(out), str(merge_out))
@@ -365,7 +451,7 @@ def test_merge_csvs_excludes_master_and_is_idempotent(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
     _write_shard_csv(
-        out / "shardA__a.csv",
+        out / "shardA__0a1b2c3d.csv",
         [["/a/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0]],
     )
     merge_out = out / "master.csv"
@@ -381,15 +467,16 @@ def test_merge_csvs_excludes_master_and_is_idempotent(tmp_path):
 def test_iter_shard_csvs_filters_and_excludes(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
-    (out / "a.csv").write_text("x", encoding="utf-8")
-    (out / "b.csv").write_text("x", encoding="utf-8")
-    (out / "c.csv.tmp").write_text("x", encoding="utf-8")  # temp, ignored
+    (out / "a__0a1b2c3d.csv").write_text("x", encoding="utf-8")
+    (out / "b__1a2b3c4d.csv").write_text("x", encoding="utf-8")
+    (out / "c__2a3b4c5d.csv.tmp").write_text("x", encoding="utf-8")  # temp, ignored
+    (out / "master.csv").write_text("x", encoding="utf-8")  # non-shard, ignored
     (out / "meta.json").write_text("x", encoding="utf-8")  # sidecar, ignored
     got = [
         os.path.basename(p)
-        for p in dfb.iter_shard_csvs(str(out), exclude=[str(out / "b.csv")])
+        for p in dfb.iter_shard_csvs(str(out), exclude=[str(out / "b__1a2b3c4d.csv")])
     ]
-    assert got == ["a.csv"]
+    assert got == ["a__0a1b2c3d.csv"]
 
 
 # ---------------------------------------------------------------------------

@@ -1326,7 +1326,7 @@ def finish_outputs(out_dir, software_dir):
         dfb.merge_csvs(out_dir, master)
     copy_file(master, os.path.join(DESKTOP_DIR, DESKTOP_MASTER))
     rows, capped, n_species, n_stations = write_wildlife_and_summary(out_dir, DESKTOP_DIR)
-    print(f"  {DESKTOP_MASTER}: full master (exceeds Excel's row limit; not spreadsheet-friendly)")
+    print(f"  {DESKTOP_MASTER}: every image (too large for Excel; open in R)")
     print(f"  {DESKTOP_WILDLIFE}: {rows:,} wildlife rows" + (" (capped to Excel's limit)" if capped else ""))
     print(f"  {DESKTOP_SUMMARY}: {n_species} species, {n_stations} stations")
     print("Building the dashboard (this can take a few minutes on the full archive)...")
@@ -1335,7 +1335,7 @@ def finish_outputs(out_dir, software_dir):
         print(f"  {DESKTOP_DASHBOARD}: opened in your browser")
     else:
         print("  dashboard not built (see dashboard.log); the CSVs are still available")
-    print("Open the wildlife and summary files in a spreadsheet; the dashboard opens in a browser.")
+    print("Open the wildlife and summary files in Excel, the master in R, and the dashboard in a browser.")
 
 
 if __name__ == "__main__":

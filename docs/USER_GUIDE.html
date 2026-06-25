@@ -3,87 +3,80 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>How to use the camera photo sorter (dfrun)</title>
+<title>Camera-trap classification: user guide</title>
 <style>
   body { font-family: system-ui, Arial, sans-serif; line-height: 1.6;
          max-width: 760px; margin: 24px auto; padding: 0 16px; color: #1d2b24; }
   h1 { font-size: 1.7rem; }
-  h2 { font-size: 1.25rem; margin-top: 1.6rem; border-bottom: 2px solid #cfe3d8; padding-bottom: 4px; }
-  ol { padding-left: 1.3rem; }
-  li { margin: 0.5rem 0; }
-  .step { background: #f3f8f5; border: 1px solid #d6e6dd; border-radius: 8px; padding: 10px 16px; }
-  .tip { background: #fff8e8; border: 1px solid #f0dca8; border-radius: 8px; padding: 10px 16px; margin: 12px 0; }
+  h2 { font-size: 1.2rem; margin-top: 1.6rem; border-bottom: 2px solid #cfe3d8; padding-bottom: 4px; }
+  ol, ul { padding-left: 1.3rem; }
+  li { margin: 0.4rem 0; }
+  .note { background: #f3f8f5; border: 1px solid #d6e6dd; border-radius: 8px; padding: 10px 16px; margin: 12px 0; }
   code { background: #eef3f0; padding: 1px 5px; border-radius: 4px; }
-  .big { font-size: 1.05rem; }
 </style>
 </head>
 <body>
 
-<h1>How to use the camera photo sorter</h1>
-<p class="big">This program looks at the camera-trap photos on the hard drive and
-writes down which animal is in each photo. You do not need to know anything about
-computers. Follow the steps below. Each step is simple.</p>
+<h1>Camera-trap classification: user guide</h1>
+<p>This tool reviews the camera-trap photographs on the hard drive and records
+the species in each image. It then produces summary tables and an interactive
+dashboard. You do not need to use the command line; the steps below are all you
+need.</p>
 
-<h2>What you need</h2>
-<ol>
-  <li>The grey computer (it can stay switched on).</li>
-  <li>The black "My Book" hard drive with the photos.</li>
-</ol>
-
-<h2>Steps to start</h2>
-<ol>
-  <li class="step">Plug the black hard drive into the computer with its cable.</li>
-  <li class="step">On the screen, find the icon called <b>dfrun (DeepFaune)</b> and
-      double-click it.
-      <div class="tip">The very first time only: right-click the icon, choose
-      <b>Allow Launching</b>, then double-click it.</div></li>
-  <li class="step">A window with text opens and asks you a few short questions.
-      For each question you can just press the <b>Enter</b> key to accept the
-      suggestion. If you want to change a number, type the new number and then
-      press <b>Enter</b>.</li>
-  <li class="step">The program starts sorting the photos. You will see a screen
-      that updates by itself, showing how many photos are done, how far along it
-      is, and how much time is left.</li>
-</ol>
-
-<h2>While it is working</h2>
+<h2>Before you start</h2>
 <ul>
-  <li>It is slow. There are about 1.8 million photos, so it can take several
-      days. This is normal.</li>
-  <li>You can <b>close the window</b> or disconnect your own laptop. The grey
-      computer keeps working on its own.</li>
-  <li>To look at the progress again later, just double-click the
-      <b>dfrun (DeepFaune)</b> icon again. It will show the live screen.</li>
-  <li>Please do not unplug the hard drive while it is working.</li>
+  <li>The computer can remain switched on.</li>
+  <li>Connect the "My Book" hard drive that holds the photographs.</li>
 </ul>
 
-<h2>When it finishes</h2>
+<h2>Running the tool</h2>
 <ol>
-  <li>A colourful <b>dashboard</b> opens by itself in the web browser, with
-      charts and a map of the animals found.</li>
-  <li>On the screen (the Desktop) you will find these files:
-    <ul>
-      <li><b>deepfaune_dashboard.html</b> - the charts and map. Double-click to open it.</li>
-      <li><b>deepfaune_wildlife.csv</b> - a table of only the animal photos. Opens in Excel.</li>
-      <li><b>deepfaune_summary.csv</b> - counts per animal and per camera. Opens in Excel.</li>
-      <li><b>deepfaune_master.csv</b> - every photo. This one is very large, so Excel
-          cannot open all of it; use the wildlife and summary files instead.</li>
-    </ul>
-  </li>
+  <li>Connect the "My Book" hard drive to the computer.</li>
+  <li>Open the <b>dfrun (DeepFaune)</b> icon on the desktop (double-click it).
+      <div class="note">The first time only: right-click the icon and choose
+      <b>Allow Launching</b>, then open it.</div></li>
+  <li>The tool asks you to confirm a few settings. Press <b>Enter</b> to accept
+      a suggested value, or type a new value and then press <b>Enter</b>.</li>
+  <li>Processing begins. A live display shows how many images are done, the
+      percentage complete, and the estimated finish time.</li>
 </ol>
-<p>The dashboard also refreshes while the program runs, so you can open it early
-to watch the results grow.</p>
 
-<h2>If it stops before finishing</h2>
-<p>Sometimes the hard drive disconnects, or the computer restarts. That is fine.
-Just plug the drive back in and double-click the <b>dfrun (DeepFaune)</b> icon
-again. It carries on from where it stopped. It never repeats work it already did.</p>
+<h2>While it is processing</h2>
+<ul>
+  <li>A large archive can take several days. This is expected.</li>
+  <li>You may close the window or disconnect from the computer; processing
+      continues on the computer itself.</li>
+  <li>Open the <b>dfrun (DeepFaune)</b> icon again at any time to view progress.</li>
+  <li>Keep the hard drive connected while it runs.</li>
+</ul>
 
-<h2>If something looks wrong</h2>
-<p>Close the window and try again from the start. If it still does not work,
-contact:</p>
-<p><b>Tom Ratsakatika</b> - trr26@cam.ac.uk / ratsakatika@gmail.com, or open an
-issue at <a href="https://github.com/ratsakatika/deepfaune-fcc">github.com/ratsakatika/deepfaune-fcc</a>.</p>
+<h2>Adding new photographs later</h2>
+<p>In normal use you will not reprocess the whole archive. When you copy new
+camera-trap photographs onto the hard drive, run the tool again. It processes
+only the new folders and updates the results and the dashboard. This is the main
+day-to-day use of the tool.</p>
+
+<h2>Results</h2>
+<p>When processing finishes, the dashboard opens automatically in a web browser.
+The following files are saved to the desktop:</p>
+<ul>
+  <li><b>deepfaune_dashboard.html</b> - interactive charts and a camera map.
+      Open it in a web browser. It also refreshes while processing, so you can
+      open it early to follow progress.</li>
+  <li><b>deepfaune_wildlife.csv</b> - the animal detections only. Opens in Excel.</li>
+  <li><b>deepfaune_summary.csv</b> - totals per species and per camera. Opens in Excel.</li>
+  <li><b>deepfaune_master.csv</b> - every image. This file is very large, so open
+      it in R rather than Excel.</li>
+</ul>
+
+<h2>If processing stops</h2>
+<p>If the hard drive disconnects or the computer restarts, reconnect the drive
+and open the <b>dfrun (DeepFaune)</b> icon again. The tool resumes from where it
+stopped and never repeats work it has already completed.</p>
+
+<h2>Support</h2>
+<p>Tom Ratsakatika - trr26@cam.ac.uk / ratsakatika@gmail.com, or open an issue at
+<a href="https://github.com/ratsakatika/deepfaune-fcc">github.com/ratsakatika/deepfaune-fcc</a>.</p>
 
 </body>
 </html>

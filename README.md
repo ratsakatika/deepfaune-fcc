@@ -19,22 +19,25 @@ engine, plus a friendly front end. Two commands:
 - `deepfaune_batch.py` - the orchestrator that `dfrun` drives. It can also be
   run directly.
 
-## Simple guide for the everyday user
+## User guide (everyday use)
 
-If you just want to run it, you do not need anything technical. A friendly,
-step-by-step guide is on the Desktop as **How_to_use_dfrun.html** (open it by
-double-clicking); the same guide is here:
-[docs/USER_GUIDE.html](docs/USER_GUIDE.html). In short:
+A step-by-step guide is on the desktop as **How_to_use_dfrun.html**; the same
+guide is here: [docs/USER_GUIDE.html](docs/USER_GUIDE.html). In short:
 
-1. Plug in the black "My Book" hard drive.
-2. Double-click the **dfrun (DeepFaune)** icon on the Desktop. The first time,
+1. Connect the "My Book" hard drive.
+2. Open the **dfrun (DeepFaune)** icon on the desktop. The first time only,
    right-click it and choose "Allow Launching".
-3. Answer the few questions by pressing Enter (or type a number, then Enter).
-4. Leave it running. It can take a few days. You may close the window; the work
-   continues. Double-click the icon again any time to see progress.
-5. When it finishes, a dashboard opens in the web browser and the result files
-   appear on the Desktop. If it ever stops, double-click the icon again to
-   continue from where it left off.
+3. Confirm the settings at the prompts: press Enter to accept a value, or type a
+   new value and press Enter.
+4. Processing runs on the computer. You may close the window or disconnect; it
+   continues. Open the icon again at any time to view progress.
+5. When it finishes, the dashboard opens in a web browser and the result files
+   are on the desktop. If it stops, open the icon again to resume.
+
+In normal use you will not reprocess the whole archive. When you add new
+camera-trap photographs to the hard drive, run the tool again: it processes only
+the new folders and updates the results and the dashboard. That incremental
+update is the main day-to-day use.
 
 ## Quick start
 
@@ -84,7 +87,7 @@ Working files stay in the output directory (default `~/df_out`):
 
 On the Desktop, for easy download:
 
-- `deepfaune_master.csv` (the full master; it exceeds Excel's row limit);
+- `deepfaune_master.csv` (every image; too large for Excel, open it in R);
 - `deepfaune_wildlife.csv` (animals only; within the spreadsheet row limit);
 - `deepfaune_summary.csv` (per-species and per-station counts);
 - `deepfaune_dashboard.html` (interactive charts and a camera map; opens in a browser).
@@ -103,6 +106,9 @@ early to watch the results grow. To rebuild it on demand without a run, use
 
 - Resumable: each shard's CSV is written atomically, and a shard that already
   has a CSV is skipped, so stopping and restarting is safe.
+- Incremental: because finished folders are skipped, adding new photographs to
+  the drive and running again classifies only the new folders and refreshes the
+  outputs and dashboard. The full archive is not reprocessed.
 - CPU only: CUDA is disabled before torch is imported and the device is forced
   to cpu.
 - The source drive is read-only and is never written to; all outputs go to

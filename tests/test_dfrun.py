@@ -283,3 +283,73 @@ def test_absolute_eta():
     when = datetime(2026, 6, 27, 2, 14, 0)
     assert dfrun.absolute_eta(3600, now=when) == "finishes Sat 27 Jun, 03:14"
     assert dfrun.absolute_eta(0) == "finishes: unknown"
+
+
+# ---------------------------------------------------------------------------
+# dashboard integration
+# ---------------------------------------------------------------------------
+def test_ensure_desktop_master_regenerates(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    monkeypatch.setattr(dfrun, "DESKTOP_DIR", str(desktop))
+    _write_shard(
+        out / "a__0a1b2c3d.csv",
+        [["/x/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0]],
+    )
+    master = dfrun.ensure_desktop_master(str(out))
+    assert master == str(desktop / dfrun.DESKTOP_MASTER)
+    assert os.path.exists(master)
+    with open(master, newline="", encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
+    assert rows[0] == dfrun.dfb.CSV_HEADER
+    assert any(r[3] == "wolf" for r in rows[1:])
+
+
+def test_dashboard_command_builds_expected_invocation(tmp_path, monkeypatch):
+    software = tmp_path / "sw"
+    software.mkdir()
+    (software / dfrun.DASHBOARD_BUILDER).write_text("# builder\n", encoding="utf-8")
+    (software / dfrun.PROTOCOL_NAME).write_text("xlsx", encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    monkeypatch.setattr(dfrun, "DESKTOP_DIR", str(desktop))
+    _write_shard(
+        out / "a__0a1b2c3d.csv",
+        [["/x/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0]],
+    )
+    cmd, out_html = dfrun.dashboard_command(str(software), str(out))
+    assert cmd is not None
+    assert cmd[1] == str(software / dfrun.DASHBOARD_BUILDER)
+    assert cmd[2] == str(desktop / dfrun.DESKTOP_MASTER)   # detections = Desktop master
+    assert cmd[3] == str(software / dfrun.PROTOCOL_NAME)
+    assert cmd[4] == str(desktop / dfrun.DESKTOP_DASHBOARD)
+    assert out_html == str(desktop / dfrun.DESKTOP_DASHBOARD)
+
+
+def test_dashboard_command_missing_builder(tmp_path, monkeypatch):
+    monkeypatch.setattr(dfrun, "DESKTOP_DIR", str(tmp_path / "Desktop"))
+    out = tmp_path / "out"
+    out.mkdir()
+    _write_shard(out / "a__0a1b2c3d.csv", [["/x/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0]])
+    cmd, out_html = dfrun.dashboard_command(str(tmp_path / "no_software"), str(out))
+    assert cmd is None and out_html is None
+
+
+def test_build_dashboard_missing_builder_returns_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(dfrun, "DESKTOP_DIR", str(tmp_path / "Desktop"))
+    assert dfrun.build_dashboard(str(tmp_path / "no_software"), str(tmp_path)) is None
+
+
+def test_maybe_rebuild_dashboard_guards(tmp_path, monkeypatch):
+    # No change in mtime: no build, returns the same handle.
+    monkeypatch.setattr(dfrun, "spawn_dashboard", lambda *a: pytest.fail("should not build"))
+    assert dfrun._maybe_rebuild_dashboard("/sw", str(tmp_path), 100.0, 100.0, None) is None
+    # No software dir: no build.
+    assert dfrun._maybe_rebuild_dashboard(None, str(tmp_path), 200.0, 100.0, None) is None
+    # Low memory: no build.
+    monkeypatch.setattr(dfrun, "enough_memory_for_dashboard", lambda: False)
+    assert dfrun._maybe_rebuild_dashboard("/sw", str(tmp_path), 200.0, 100.0, None) is None

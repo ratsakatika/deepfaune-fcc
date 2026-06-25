@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -68,6 +69,26 @@ CSV_HEADER = [
     "animal_count",
     "human_count",
 ]
+
+# A shard CSV is named "<sanitised-relpath>__<8 hex>.csv" by shard_csv_name.
+# This pattern selects only shard CSVs, so the merge and the counters ignore
+# master.csv, the summary files and any Desktop copies.
+SHARD_CSV_RE = re.compile(r"__[0-9a-f]{8}\.csv$")
+
+# Non-survey directories that appear on the exFAT drive and must never be
+# classified or counted: the Windows recycle bin, volume metadata, and the
+# exFAT repair artefacts left behind by a filesystem check.
+SYSTEM_DIR_NAMES = {"$RECYCLE.BIN", "System Volume Information"}
+
+
+def is_shard_csv(name):
+    """True if name looks like a per-shard CSV produced by shard_csv_name."""
+    return bool(SHARD_CSV_RE.search(os.path.basename(name)))
+
+
+def is_system_dir(name):
+    """True for OS or filesystem directories that are not survey content."""
+    return name in SYSTEM_DIR_NAMES or name.startswith("FOUND.")
 
 
 ####################################################################################
@@ -111,7 +132,9 @@ def find_shards(root):
     root = os.path.abspath(root)
     shards = []
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        dirnames.sort()  # deterministic, depth-first traversal
+        # Prune non-survey directories in place so we never descend into them,
+        # and keep the traversal deterministic.
+        dirnames[:] = sorted(d for d in dirnames if not is_system_dir(d))
         images = list_images_in_dir(dirpath, filenames)
         if images:
             shards.append((dirpath, images))
@@ -213,12 +236,15 @@ def atomic_write_csv(path, header, rows):
 def iter_shard_csvs(out_dir, exclude=()):
     """Yield the per-shard CSV paths in out_dir, sorted.
 
-    Globs exactly "*.csv" so the ".tmp" temp files and the JSON metadata sidecar
-    are ignored. Paths in exclude (such as the master itself) are skipped, so
-    regenerating the master never reads its own output.
+    Globs "*.csv" and keeps only files matching the shard-name pattern, so the
+    ".tmp" temp files, the JSON metadata sidecar, master.csv and the summary
+    files are all ignored. Paths in exclude (such as the master itself) are
+    skipped too, so regenerating the master never reads its own output.
     """
     exclude_abs = {os.path.abspath(p) for p in exclude}
     for path in sorted(glob.glob(os.path.join(out_dir, "*.csv"))):
+        if not is_shard_csv(path):
+            continue
         if os.path.abspath(path) in exclude_abs:
             continue
         yield path
@@ -270,6 +296,26 @@ def merge_csvs(out_dir, merge_out, header=CSV_HEADER):
     return n_files, n_rows
 
 
+def count_classified_images(out_dir):
+    """Count images already classified across all existing shard CSVs.
+
+    Each shard CSV holds one row per image plus a header, so the count is the
+    sum of (lines - 1) over the shard CSVs. Line counting is used for speed; an
+    embedded newline in a quoted field would be a negligible over-count and is
+    not worth a slower csv parse over the whole output directory. This is the
+    basis for the true overall percentage that survives restarts.
+    """
+    total = 0
+    for path in iter_shard_csvs(out_dir):
+        try:
+            with open(path, "rb") as handle:
+                lines = sum(1 for _ in handle)
+        except OSError:
+            continue
+        total += max(0, lines - 1)
+    return total
+
+
 def format_duration(seconds):
     """Format a number of seconds as H:MM:SS for human-readable ETAs."""
     seconds = int(max(0, seconds))
@@ -278,26 +324,90 @@ def format_duration(seconds):
     return f"{hours:d}:{minutes:02d}:{secs:02d}"
 
 
+class RateTracker:
+    """Smoothed throughput from a rolling time window of cumulative counts.
+
+    Sampling the running image count over a recent window (rather than dividing
+    total-by-elapsed) makes the rate update continuously between shard
+    completions instead of reading near zero mid-shard and jumping on "Finished".
+    """
+
+    def __init__(self, window_seconds=300):
+        self.window = window_seconds
+        self.samples = deque()  # (monotonic_time, cumulative_count)
+
+    def update(self, count, now=None):
+        now = time.monotonic() if now is None else now
+        self.samples.append((now, count))
+        # Keep at least two samples; drop those older than the window.
+        while len(self.samples) > 2 and now - self.samples[0][0] > self.window:
+            self.samples.popleft()
+
+    def rate(self):
+        if len(self.samples) < 2:
+            return 0.0
+        t0, c0 = self.samples[0]
+        t1, c1 = self.samples[-1]
+        dt = t1 - t0
+        return (c1 - c0) / dt if dt > 0 else 0.0
+
+
 class Progress:
-    """Tracks images done against a target to report throughput and an ETA."""
+    """Tracks true overall progress across all sessions plus a smoothed rate.
 
-    def __init__(self, total_images):
-        self.total = total_images
-        self.done = 0
+    The true figure is images classified across every session (counted from the
+    existing shard CSVs at start, plus shards completed this session) divided by
+    the whole-archive total, so the percentage does not understate real progress
+    after a restart. The rate and ETA come from a rolling window so they update
+    continuously, and the ETA is for finishing the whole archive.
+    """
+
+    def __init__(self, archive_total, done_start, window_seconds=300):
+        self.archive_total = archive_total          # images on the drive
+        self.done_start = done_start                # classified before this session
+        self.completed_session = 0                  # persisted this session
+        self.current_shard_done = 0                 # in flight, not yet persisted
         self.start = time.monotonic()
+        self.rate_tracker = RateTracker(window_seconds)
+        self.rate_tracker.update(0.0, self.start)
 
-    def add(self, n):
-        self.done += n
+    @property
+    def true_done(self):
+        return self.done_start + self.completed_session
+
+    @property
+    def processed_session(self):
+        return self.completed_session + self.current_shard_done
+
+    def note_progress(self, current_shard_done):
+        """Record in-flight progress within the current shard (for the rate)."""
+        self.current_shard_done = current_shard_done
+        self.rate_tracker.update(self.processed_session)
+
+    def complete_shard(self, n):
+        """Record a shard whose CSV has been written (persisted progress)."""
+        self.completed_session += n
+        self.current_shard_done = 0
+        self.rate_tracker.update(self.processed_session)
+
+    def true_pct(self):
+        if not self.archive_total:
+            return 100.0
+        return min(100.0, 100.0 * self.true_done / self.archive_total)
+
+    def rate(self):
+        return self.rate_tracker.rate()
+
+    def eta_seconds(self):
+        rate = self.rate()
+        remaining = max(0, self.archive_total - self.true_done)
+        return remaining / rate if rate > 0 else 0.0
 
     def summary(self):
-        elapsed = time.monotonic() - self.start
-        rate = self.done / elapsed if elapsed > 0 and self.done > 0 else 0.0
-        remaining = max(0, self.total - self.done)
-        eta = remaining / rate if rate > 0 else 0.0
-        pct = (100.0 * self.done / self.total) if self.total else 100.0
         return (
-            f"{self.done}/{self.total} images ({pct:.1f}%) | "
-            f"{rate:.2f} img/s | ETA {format_duration(eta)}"
+            f"{self.true_done}/{self.archive_total} images "
+            f"({self.true_pct():.1f}%) | {self.rate():.2f} img/s | "
+            f"ETA {format_duration(self.eta_seconds())}"
         )
 
 
@@ -410,6 +520,30 @@ def write_run_metadata(out_dir, software_dir, root, args):
     return path, metadata
 
 
+def write_status(out_dir, partition, status):
+    """Write status.p<partition>.json atomically for the live readout to poll.
+
+    One file per partition so processes do not race. Best-effort: a failed
+    status write must never interrupt classification, so errors are swallowed.
+    """
+    path = os.path.join(out_dir, f"status.p{partition}.json")
+    directory = os.path.dirname(path) or "."
+    tmp = None
+    try:
+        fd, tmp = tempfile.mkstemp(
+            dir=directory, prefix=os.path.basename(path) + ".", suffix=".tmp"
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(status, handle)
+        os.replace(tmp, path)
+    except OSError:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
 ####################################################################################
 ### ENGINE GLUE (imports torch indirectly; only used on the real run path)
 ####################################################################################
@@ -497,11 +631,13 @@ def build_rows(predictor):
 
 def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
                   batch_size, detector_name, stopper, heartbeat_secs, progress,
-                  shard_label):
+                  shard_label, report=None):
     """Run the engine over one shard.
 
     Returns the list of CSV rows, or None if a stop was requested mid-shard (in
-    which case nothing is written and the shard is redone on resume).
+    which case nothing is written and the shard is redone on resume). The rate
+    tracker is fed every batch so throughput and ETA update continuously, and
+    the optional report callback refreshes the status file on each heartbeat.
     """
     predictor = predict_tools.PredictorImage(
         image_paths,
@@ -526,12 +662,16 @@ def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
                 shard_label, min(k2, total), total,
             )
             return None
+        # Feed the smoothed rate every batch so the readout never reads zero.
+        progress.note_progress(min(k2, total))
         now = time.monotonic()
         if heartbeat_secs and (now - last_hb) >= heartbeat_secs:
             LOG.info(
                 "  %s: %d/%d images in shard | overall %s",
                 shard_label, min(k2, total), total, progress.summary(),
             )
+            if report is not None:
+                report(shard_label, "running")
             last_hb = now
     return build_rows(predictor)
 
@@ -572,6 +712,8 @@ def validate_common(args):
         )
     if args.batch_size < 1:
         return f"--batch-size must be >= 1 (got {args.batch_size})"
+    if args.threads < 1:
+        return f"--threads must be >= 1 (got {args.threads})"
     if args.maxlag < 0:
         return f"--maxlag must be >= 0 (got {args.maxlag})"
     if not 0 < args.threshold <= 1:
@@ -691,10 +833,11 @@ def run(args):
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
     # Thread limits must be set before torch is imported to bind the native
-    # pools; setdefault respects any value the operator already exported.
-    if args.threads and args.threads > 0:
-        os.environ.setdefault("OMP_NUM_THREADS", str(args.threads))
-        os.environ.setdefault("MKL_NUM_THREADS", str(args.threads))
+    # pools. Capping threads also bounds PyTorch's shared-memory footprint,
+    # which contributed to the earlier out-of-memory kill. setdefault respects
+    # any value the operator already exported.
+    os.environ.setdefault("OMP_NUM_THREADS", str(args.threads))
+    os.environ.setdefault("MKL_NUM_THREADS", str(args.threads))
 
     if args.detector == "MDR":
         LOG.warning("Detector MDR (redwood, 1280 px) is slow on CPU; expect a long run")
@@ -724,8 +867,7 @@ def run(args):
     import classifTools  # noqa: E402
     import detectTools  # noqa: E402
 
-    if args.threads and args.threads > 0:
-        torch.set_num_threads(args.threads)
+    torch.set_num_threads(args.threads)
     LOG.info(
         "torch %s | cuda available: %s | intra-op threads: %d",
         torch.__version__, torch.cuda.is_available(), torch.get_num_threads(),
@@ -742,18 +884,38 @@ def run(args):
     )
     LOG.info("Models loaded in %.1fs", time.monotonic() - t0)
 
+    # Record images the engine cannot read to a sidecar so they can be audited,
+    # and keep a running count rather than letting a bad file abort the run.
+    unreadable_path = os.path.join(out_dir, "unreadable_images.txt")
+    skipped = {"count": 0, "fh": None}
+
+    def record_unreadable(filename, reason):
+        skipped["count"] += 1
+        if skipped["fh"] is None:  # open lazily so a clean run leaves no file
+            skipped["fh"] = open(unreadable_path, "a", encoding="utf-8")
+        skipped["fh"].write(
+            f"{datetime.now(timezone.utc).isoformat()}\t{reason}\t{filename}\n"
+        )
+        skipped["fh"].flush()
+
+    detectTools.skipped_image_hook = record_unreadable
+
     shards = find_shards(root)
     selected = select_partition(shards, args.num_partitions, args.partition)
     plan = plan_shards(selected, out_dir, root, args.rescan)
-    selected_images = sum(len(imgs) for _, imgs in selected)
+    archive_total = sum(len(imgs) for _, imgs in shards)
     plan_images = sum(len(imgs) for _, imgs, _ in plan)
+    done_start = count_classified_images(out_dir)
     LOG.info(
-        "Shards in this partition: %d (%d images)", len(selected), selected_images
+        "Archive total: %d images | already classified (all sessions): %d (%.1f%%)",
+        archive_total, done_start,
+        (100.0 * done_start / archive_total) if archive_total else 100.0,
     )
     LOG.info(
-        "Shards to process after resume skip: %d (%d images)",
+        "Shards to process this session after resume skip: %d (%d images)",
         len(plan), plan_images,
     )
+
     # The master is a derived snapshot. Only partition 0 writes it, so a
     # multi-process run does not race on it; during such a run the master
     # reflects only the shards finished so far (by any partition), so run
@@ -770,28 +932,52 @@ def run(args):
             args.partition,
         )
 
+    progress = Progress(archive_total, done_start)
+    start_unix = time.time()
+
+    def report(current_shard, state):
+        write_status(out_dir, args.partition, {
+            "pid": os.getpid(),
+            "state": state,
+            "start_time_unix": start_unix,
+            "updated_unix": time.time(),
+            "current_shard": current_shard,
+            "archive_total": progress.archive_total,
+            "true_done": progress.true_done,
+            "true_pct": round(progress.true_pct(), 2),
+            "rate_img_per_s": round(progress.rate(), 3),
+            "eta_seconds": int(progress.eta_seconds()),
+            "session_processed": progress.processed_session,
+            "skipped_unreadable": skipped["count"],
+            "detector": args.detector,
+            "threshold": args.threshold,
+            "maxlag": args.maxlag,
+            "birds": args.birds,
+        })
+
     if not plan:
         LOG.info("Nothing to do; all shards in this partition already have CSVs")
         if do_merge:
             n_files, n_rows = merge_csvs(out_dir, merge_out)
             LOG.info("Master rebuilt: %d shards, %d rows -> %s", n_files, n_rows, merge_out)
+        report(None, "finished")
         return 0
 
     stopper = Stopper()
     signal.signal(signal.SIGINT, stopper.handle)
     signal.signal(signal.SIGTERM, stopper.handle)
 
-    progress = Progress(plan_images)
+    report(None, "running")
     processed = 0
     last_merge = time.monotonic()
     for leaf_dir, image_paths, csv_path in plan:
         if stopper.stop:
             LOG.warning("Stopping before next shard as requested")
             break
-        if args.max_images is not None and progress.done >= args.max_images:
+        if args.max_images is not None and progress.completed_session >= args.max_images:
             LOG.info(
-                "Reached --max-images %d (%d images done); stopping at shard boundary",
-                args.max_images, progress.done,
+                "Reached --max-images %d (%d images this session); stopping at shard boundary",
+                args.max_images, progress.completed_session,
             )
             break
         shard_label = os.path.relpath(leaf_dir, root)
@@ -799,20 +985,25 @@ def run(args):
             "Shard %s: %d images -> %s",
             shard_label, len(image_paths), os.path.basename(csv_path),
         )
+        report(shard_label, "running")
         rows = process_shard(
             predictTools, image_paths,
             threshold=args.threshold, maxlag=args.maxlag, lang=args.lang,
             birds=args.birds, batch_size=args.batch_size,
             detector_name=args.detector, stopper=stopper,
             heartbeat_secs=args.heartbeat_secs, progress=progress,
-            shard_label=shard_label,
+            shard_label=shard_label, report=report,
         )
         if rows is None:  # aborted mid-shard by a signal
             break
         atomic_write_csv(csv_path, CSV_HEADER, rows)
-        progress.add(len(image_paths))
+        progress.complete_shard(len(image_paths))
         processed += 1
-        LOG.info("Finished %s | %s", shard_label, progress.summary())
+        LOG.info(
+            "Finished %s | %s | skipped unreadable so far: %d",
+            shard_label, progress.summary(), skipped["count"],
+        )
+        report(shard_label, "running")
         if do_merge and (time.monotonic() - last_merge) >= args.merge_every:
             n_files, n_rows = merge_csvs(out_dir, merge_out)
             LOG.info(
@@ -828,9 +1019,14 @@ def run(args):
             n_files, n_rows, merge_out,
         )
 
+    if skipped["fh"] is not None:
+        skipped["fh"].close()
+    final_state = "stopped" if stopper.stop else "finished"
+    report(None, final_state)
     LOG.info(
-        "Run ended: %d shards written this session | %s",
-        processed, progress.summary(),
+        "Run ended (%s): %d shards written this session | %s | "
+        "skipped unreadable: %d",
+        final_state, processed, progress.summary(), skipped["count"],
     )
     return 0
 
@@ -866,12 +1062,14 @@ def build_arg_parser():
         help="Detector model (default: DF, the lightest).",
     )
     parser.add_argument(
-        "--threshold", type=float, default=0.5,
-        help="Classification confidence threshold (default: 0.5).",
+        "--threshold", type=float, default=0.8,
+        help="Classification confidence threshold (default: 0.8, the official "
+             "DeepFaune GUI default).",
     )
     parser.add_argument(
-        "--maxlag", type=int, default=20,
-        help="Seconds between photos to count as one EXIF burst (default: 20).",
+        "--maxlag", type=int, default=10,
+        help="Seconds between photos to count as one EXIF burst (default: 10, "
+             "the official DeepFaune GUI default).",
     )
     parser.add_argument(
         "--lang", default="en", choices=LANG_CHOICES,
@@ -886,8 +1084,9 @@ def build_arg_parser():
         help="Classifier batch size (default: 8).",
     )
     parser.add_argument(
-        "--threads", type=int, default=0,
-        help="Intra-op CPU threads; 0 leaves the torch/library default.",
+        "--threads", type=int, default=4,
+        help="Intra-op CPU threads (default: 4). Must be >= 1; capping this also "
+             "bounds memory use.",
     )
     parser.add_argument(
         "--num-partitions", type=int, default=1,
@@ -933,6 +1132,14 @@ def build_arg_parser():
 
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
+    # Reject contradictory mode combinations: --dry-run and --merge are each
+    # standalone terminal modes and cannot be requested together.
+    if args.dry_run and args.merge:
+        print(
+            "error: --dry-run and --merge are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 2
     if args.dry_run:
         return dry_run(args)
     if args.merge:

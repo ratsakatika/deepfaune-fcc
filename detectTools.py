@@ -139,8 +139,28 @@ class MDRedwood:
 
 
 ####################################################################################
-### BEST BOX DETECTION 
+### BEST BOX DETECTION
 ####################################################################################
+# Optional audit hook. The batch orchestrator may set this to record images that
+# could not be processed (missing, unreadable or errored) so they can be audited
+# instead of crashing the run or printing a traceback. Default is None (no-op),
+# so the engine's behaviour is unchanged when the hook is not installed.
+# Signature: skipped_image_hook(filename, reason).
+skipped_image_hook = None
+
+
+def _note_skipped_image(filename_or_imagecv, reason):
+    if skipped_image_hook is None:
+        return
+    # Only filenames can be recorded; video frames and raw arrays have none.
+    if not isinstance(filename_or_imagecv, str):
+        return
+    try:
+        skipped_image_hook(filename_or_imagecv, reason)
+    except Exception:
+        pass
+
+
 class Detector:
     def __init__(self, name=DFYOLO_NAME, device=None):
         print(f"Using {name} for detection")
@@ -166,14 +186,17 @@ class Detector:
         try:
             results = self.yolo(filename_or_imagecv, device=self.device)
         except FileNotFoundError:
+            _note_skipped_image(filename_or_imagecv, "missing")
             return None, 0, np.zeros(4), 0, []
         except Exception as err:
             print(err)
+            _note_skipped_image(filename_or_imagecv, "error")
             return None, 0, np.zeros(4), 0, []
         # Ultralytics returns an empty results list when it cannot read an image
         # (a corrupt or truncated file gives "Image Read Error"). Guard before
         # indexing so a single bad file does not crash a multi-day batch run.
         if results is None or len(results) == 0:
+            _note_skipped_image(filename_or_imagecv, "unreadable")
             return None, 0, np.zeros(4), 0, []
         # orig_img a numpy array (cv2) in BGR
         imagecv = results[0].cpu().orig_img

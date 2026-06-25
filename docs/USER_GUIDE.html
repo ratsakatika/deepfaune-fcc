@@ -35,6 +35,29 @@ need.</p>
       percentage complete, and the estimated finish time.</li>
 </ol>
 
+<h2>What the settings mean</h2>
+<p>At step 3 the tool shows a few settings. You can press Enter to accept the
+recommended values; they are sensible for this survey. If you do want to change
+one, here is what each means.</p>
+<ul>
+  <li><b>Confidence threshold</b> (recommended 0.5) - how sure the tool must be
+      before it names a species. A higher value (for example 0.8) means it only
+      commits when very confident: fewer wrong names, but more animals are left
+      labelled "undefined". A lower value names more photos, but more of those
+      names are wrong. 0.5 is a balanced middle.</li>
+  <li><b>Sequence gap</b> (recommended 20 seconds) - photos taken within this many
+      seconds at the same camera are treated as one sighting, so a quick burst of
+      frames is counted once rather than many times. A larger gap groups more
+      photos together; a smaller gap counts them more separately.</li>
+  <li><b>Detector</b> (recommended DF) - the method that first finds the animal in
+      each photo. DF is the fastest. The others are more thorough but slower.</li>
+  <li><b>Birds</b> (recommended on) - also sorts birds into groups, such as
+      corvid, raptor or passerine, instead of just "bird".</li>
+  <li><b>Processor cores</b> (recommended 4) - how much of the computer to use.
+      More is faster but makes the computer work harder; fewer is gentler.</li>
+</ul>
+<p>The other settings can be left as they are.</p>
+
 <h2>While it is processing</h2>
 <ul>
   <li>A large archive can take several days. This is expected.</li>

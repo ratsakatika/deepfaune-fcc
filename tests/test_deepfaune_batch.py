@@ -320,10 +320,10 @@ def test_validate_common_threads():
     assert dfb.validate_common(_args(threads=1)) is None
 
 
-def test_official_defaults_are_used():
-    # Locks the decision to follow the official DeepFaune GUI defaults.
+def test_default_parameters():
+    # Threshold 0.5 (matches the first long run and the demo) and maxlag 10.
     args = dfb.build_arg_parser().parse_args(["--out-dir", "/tmp/unused"])
-    assert args.threshold == 0.8
+    assert args.threshold == 0.5
     assert args.maxlag == 10
     assert args.threads == 4
 

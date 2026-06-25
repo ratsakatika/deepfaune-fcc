@@ -19,11 +19,28 @@ engine, plus a friendly front end. Two commands:
 - `deepfaune_batch.py` - the orchestrator that `dfrun` drives. It can also be
   run directly.
 
+## Simple guide for the everyday user
+
+If you just want to run it, you do not need anything technical. A friendly,
+step-by-step guide is on the Desktop as **How_to_use_dfrun.html** (open it by
+double-clicking); the same guide is here:
+[docs/USER_GUIDE.html](docs/USER_GUIDE.html). In short:
+
+1. Plug in the black "My Book" hard drive.
+2. Double-click the **dfrun (DeepFaune)** icon on the Desktop. The first time,
+   right-click it and choose "Allow Launching".
+3. Answer the few questions by pressing Enter (or type a number, then Enter).
+4. Leave it running. It can take a few days. You may close the window; the work
+   continues. Double-click the icon again any time to see progress.
+5. When it finishes, a dashboard opens in the web browser and the result files
+   appear on the Desktop. If it ever stops, double-click the icon again to
+   continue from where it left off.
+
 ## Quick start
 
 1. Install the DeepFaune dependencies in a virtual environment (see the
    DeepFaune documentation below), then add the front-end extras:
-   `pip install rich psutil`.
+   `pip install rich psutil plotly openpyxl`.
 2. Put the tool on PATH and add a Desktop shortcut: `make install`
    (or `bash install.sh`). The first time you use the Desktop icon, right-click
    it and choose "Allow Launching" so GNOME trusts it.
@@ -32,7 +49,8 @@ engine, plus a friendly front end. Two commands:
    how much is already done, asks you to confirm the settings, then launches.
 5. Watch the live readout. You can close the window or disconnect; the run
    keeps going. Re-run `dfrun` to reattach to it.
-6. When it finishes, the spreadsheet-friendly outputs are on your Desktop.
+6. When it finishes, a dashboard opens in your browser and the
+   spreadsheet-friendly outputs are on your Desktop.
 
 To resume after any stop, just run `dfrun` again; finished shards are skipped.
 
@@ -68,7 +86,18 @@ On the Desktop, for easy download:
 
 - `deepfaune_master.csv` (the full master; it exceeds Excel's row limit);
 - `deepfaune_wildlife.csv` (animals only; within the spreadsheet row limit);
-- `deepfaune_summary.csv` (per-species and per-station counts).
+- `deepfaune_summary.csv` (per-species and per-station counts);
+- `deepfaune_dashboard.html` (interactive charts and a camera map; opens in a browser).
+
+## Dashboard
+
+`deepfaune_dashboard.html` is built from the Desktop master CSV by
+`build_dashboard.py`, with the camera map placed from
+`FieldProtocols_WTM_FAR_23.xlsx` in the software directory (the map is omitted if
+the protocol is absent). It opens automatically when a run finishes, and is
+rebuilt in the background each time the master is updated, so you can open it
+early to watch the results grow. To rebuild it on demand without a run, use
+`dfrun --dashboard`.
 
 ## Resume and safety
 

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to use the camera photo sorter (dfrun)</title>
+<style>
+  body { font-family: system-ui, Arial, sans-serif; line-height: 1.6;
+         max-width: 760px; margin: 24px auto; padding: 0 16px; color: #1d2b24; }
+  h1 { font-size: 1.7rem; }
+  h2 { font-size: 1.25rem; margin-top: 1.6rem; border-bottom: 2px solid #cfe3d8; padding-bottom: 4px; }
+  ol { padding-left: 1.3rem; }
+  li { margin: 0.5rem 0; }
+  .step { background: #f3f8f5; border: 1px solid #d6e6dd; border-radius: 8px; padding: 10px 16px; }
+  .tip { background: #fff8e8; border: 1px solid #f0dca8; border-radius: 8px; padding: 10px 16px; margin: 12px 0; }
+  code { background: #eef3f0; padding: 1px 5px; border-radius: 4px; }
+  .big { font-size: 1.05rem; }
+</style>
+</head>
+<body>
+
+<h1>How to use the camera photo sorter</h1>
+<p class="big">This program looks at the camera-trap photos on the hard drive and
+writes down which animal is in each photo. You do not need to know anything about
+computers. Follow the steps below. Each step is simple.</p>
+
+<h2>What you need</h2>
+<ol>
+  <li>The grey computer (it can stay switched on).</li>
+  <li>The black "My Book" hard drive with the photos.</li>
+</ol>
+
+<h2>Steps to start</h2>
+<ol>
+  <li class="step">Plug the black hard drive into the computer with its cable.</li>
+  <li class="step">On the screen, find the icon called <b>dfrun (DeepFaune)</b> and
+      double-click it.
+      <div class="tip">The very first time only: right-click the icon, choose
+      <b>Allow Launching</b>, then double-click it.</div></li>
+  <li class="step">A window with text opens and asks you a few short questions.
+      For each question you can just press the <b>Enter</b> key to accept the
+      suggestion. If you want to change a number, type the new number and then
+      press <b>Enter</b>.</li>
+  <li class="step">The program starts sorting the photos. You will see a screen
+      that updates by itself, showing how many photos are done, how far along it
+      is, and how much time is left.</li>
+</ol>
+
+<h2>While it is working</h2>
+<ul>
+  <li>It is slow. There are about 1.8 million photos, so it can take several
+      days. This is normal.</li>
+  <li>You can <b>close the window</b> or disconnect your own laptop. The grey
+      computer keeps working on its own.</li>
+  <li>To look at the progress again later, just double-click the
+      <b>dfrun (DeepFaune)</b> icon again. It will show the live screen.</li>
+  <li>Please do not unplug the hard drive while it is working.</li>
+</ul>
+
+<h2>When it finishes</h2>
+<ol>
+  <li>A colourful <b>dashboard</b> opens by itself in the web browser, with
+      charts and a map of the animals found.</li>
+  <li>On the screen (the Desktop) you will find these files:
+    <ul>
+      <li><b>deepfaune_dashboard.html</b> - the charts and map. Double-click to open it.</li>
+      <li><b>deepfaune_wildlife.csv</b> - a table of only the animal photos. Opens in Excel.</li>
+      <li><b>deepfaune_summary.csv</b> - counts per animal and per camera. Opens in Excel.</li>
+      <li><b>deepfaune_master.csv</b> - every photo. This one is very large, so Excel
+          cannot open all of it; use the wildlife and summary files instead.</li>
+    </ul>
+  </li>
+</ol>
+<p>The dashboard also refreshes while the program runs, so you can open it early
+to watch the results grow.</p>
+
+<h2>If it stops before finishing</h2>
+<p>Sometimes the hard drive disconnects, or the computer restarts. That is fine.
+Just plug the drive back in and double-click the <b>dfrun (DeepFaune)</b> icon
+again. It carries on from where it stopped. It never repeats work it already did.</p>
+
+<h2>If something looks wrong</h2>
+<p>Close the window and try again from the start. If it still does not work,
+contact:</p>
+<p><b>Tom Ratsakatika</b> - trr26@cam.ac.uk / ratsakatika@gmail.com, or open an
+issue at <a href="https://github.com/ratsakatika/deepfaune-fcc">github.com/ratsakatika/deepfaune-fcc</a>.</p>
+
+</body>
+</html>

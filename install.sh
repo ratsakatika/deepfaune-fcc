@@ -53,14 +53,20 @@ EOF
   gio set "${DESKTOP_FILE}" metadata::trusted true 2>/dev/null || true
   echo "Installed Desktop shortcut: ${DESKTOP_FILE}"
   echo "First time only: right-click the icon and choose 'Allow Launching' so GNOME trusts it."
+
+  # Friendly plain-English guide on the Desktop.
+  if [ -f "${REPO_DIR}/docs/USER_GUIDE.html" ]; then
+    cp "${REPO_DIR}/docs/USER_GUIDE.html" "${DESKTOP_DIR}/How_to_use_dfrun.html"
+    echo "Installed guide: ${DESKTOP_DIR}/How_to_use_dfrun.html"
+  fi
 else
   echo "No ${DESKTOP_DIR}; skipped the Desktop shortcut."
 fi
 
-# 3. Optional runtime extras for the live readout.
-if ! "${PYTHON}" -c "import rich, psutil" 2>/dev/null; then
-  echo "NOTE: the live readout needs 'rich' and 'psutil'. Install them with:"
-  echo "      ${PYTHON} -m pip install rich psutil"
+# 3. Runtime extras for the live screen and the dashboard.
+if ! "${PYTHON}" -c "import rich, psutil, plotly" 2>/dev/null; then
+  echo "NOTE: the live screen and dashboard need 'rich', 'psutil' and 'plotly'. Install with:"
+  echo "      ${PYTHON} -m pip install rich psutil plotly openpyxl"
 fi
 
 echo "Done. Run 'dfrun' to start (or use the Desktop shortcut)."

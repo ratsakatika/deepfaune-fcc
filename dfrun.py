@@ -85,6 +85,16 @@ MASTER_NAME = "master.csv"
 DESKTOP_MASTER = "deepfaune_master.csv"
 DESKTOP_WILDLIFE = "deepfaune_wildlife.csv"
 DESKTOP_SUMMARY = "deepfaune_summary.csv"
+DESKTOP_DASHBOARD = "deepfaune_dashboard.html"
+DESKTOP_GUIDE = "How_to_use_dfrun.html"
+
+# The dashboard builder (in the software dir) and the field protocol it reads.
+DASHBOARD_BUILDER = "build_dashboard.py"
+PROTOCOL_NAME = "FieldProtocols_WTM_FAR_23.xlsx"
+# Skip a live dashboard rebuild when available memory is below this, so the
+# build cannot trigger the out-of-memory killer mid-run. The build at the end,
+# after the worker has exited and freed memory, always runs.
+MIN_DASHBOARD_MEM_GIB = 4
 
 # Excel's worksheet row limit (including the header row).
 EXCEL_ROW_LIMIT = 1_048_576
@@ -721,6 +731,117 @@ def write_wildlife_and_summary(out_dir, desktop_dir):
 
 
 ####################################################################################
+### DASHBOARD (wraps build_dashboard.py; never reimplements it)
+####################################################################################
+def open_in_browser(path):
+    """Open a file in the default browser, detached. Best-effort."""
+    try:
+        subprocess.Popen(
+            ["xdg-open", path],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+    except OSError:
+        pass
+
+
+def ensure_desktop_master(out_dir):
+    """Ensure the master CSV is on the Desktop, regenerating it if missing.
+
+    Returns the Desktop master path, or None if it could not be produced. The
+    dashboard's detections are this Desktop master, as requested.
+    """
+    desktop_master = os.path.join(DESKTOP_DIR, DESKTOP_MASTER)
+    if not os.path.exists(desktop_master):
+        src = os.path.join(out_dir, MASTER_NAME)
+        try:
+            if not os.path.exists(src):
+                dfb.merge_csvs(out_dir, src)
+            copy_file(src, desktop_master)
+        except OSError:
+            return None
+    return desktop_master if os.path.exists(desktop_master) else None
+
+
+def dashboard_command(software_dir, out_dir):
+    """Return (cmd, out_html) to render the dashboard, or (None, None).
+
+    Detections come from the Desktop master (regenerated if missing); the field
+    protocol in software_dir, if present, adds the camera map (the builder omits
+    the map gracefully when it is absent).
+    """
+    builder = os.path.join(software_dir, DASHBOARD_BUILDER)
+    if not os.path.exists(builder):
+        return None, None
+    desktop_master = ensure_desktop_master(out_dir)
+    if not desktop_master:
+        return None, None
+    out_html = os.path.join(DESKTOP_DIR, DESKTOP_DASHBOARD)
+    protocol = os.path.join(software_dir, PROTOCOL_NAME)
+    return [sys.executable, builder, desktop_master, protocol, out_html], out_html
+
+
+def dashboard_env(out_dir):
+    """Environment for the builder, caching its web assets under out_dir (not the
+    repo, so the self-update dirty-tree check is never tripped)."""
+    env = dict(os.environ)
+    env["DASHBOARD_ASSET_DIR"] = os.path.join(out_dir, "dashboard_assets")
+    return env
+
+
+def build_dashboard(software_dir, out_dir, open_after=False):
+    """Build the dashboard HTML on the Desktop (blocking). Best-effort.
+
+    Runs the builder in a subprocess so its memory is released and a failure
+    cannot disrupt the run. Returns the HTML path or None.
+    """
+    cmd, out_html = dashboard_command(software_dir, out_dir)
+    if not cmd:
+        return None
+    try:
+        result = subprocess.run(
+            cmd, cwd=software_dir, env=dashboard_env(out_dir),
+            capture_output=True, text=True, timeout=3600,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"Dashboard build skipped: {exc}")
+        return None
+    if result.returncode != 0:
+        print("Dashboard build failed (continuing):")
+        for line in (result.stderr or result.stdout or "").strip().splitlines()[-5:]:
+            print(f"  {line}")
+        return None
+    if open_after:
+        open_in_browser(out_html)
+    return out_html
+
+
+def spawn_dashboard(software_dir, out_dir):
+    """Start a dashboard build in the background (non-blocking). Returns Popen or None."""
+    cmd, _out_html = dashboard_command(software_dir, out_dir)
+    if not cmd:
+        return None
+    try:
+        log = open(os.path.join(out_dir, "dashboard.log"), "ab")
+        return subprocess.Popen(
+            cmd, cwd=software_dir, env=dashboard_env(out_dir),
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    except OSError:
+        return None
+
+
+def enough_memory_for_dashboard(min_gib=MIN_DASHBOARD_MEM_GIB):
+    """True if there is enough free RAM to build the dashboard mid-run safely."""
+    try:
+        import psutil
+        return gib(psutil.virtual_memory().available) >= min_gib
+    except Exception:
+        return True  # cannot tell; allow
+
+
+####################################################################################
 ### TIME / FORMAT HELPERS
 ####################################################################################
 def absolute_eta(eta_seconds, now=None):
@@ -963,19 +1084,21 @@ def render_readout(out_dir, stats, status, sysinfo):
     return Panel(table, title=f"{TOOL_NAME}: {state}", border_style="green")
 
 
-def live_readout(out_dir, refresh_secs=3):
+def live_readout(out_dir, software_dir=None, refresh_secs=3):
     """Stage 6: render the live panel until the worker exits or the user detaches.
 
     Closing the readout (Ctrl-C) does not stop the worker; re-running the tool
-    reattaches. The master.csv copy on the Desktop is refreshed whenever it
-    changes. Returns the final status dict.
+    reattaches. Whenever master.csv changes it is copied to the Desktop and the
+    dashboard is rebuilt in the background (memory permitting). Returns the final
+    status dict.
     """
     try:
         from rich.live import Live
     except ImportError:
-        return _plain_readout(out_dir, refresh_secs)
+        return _plain_readout(out_dir, software_dir, refresh_secs)
     stats = StatsAccumulator()
     last_master_mtime = None
+    dash_proc = None
     final_status = None
     try:
         with Live(refresh_per_second=4, screen=False) as live:
@@ -984,7 +1107,11 @@ def live_readout(out_dir, refresh_secs=3):
                 status = read_status(out_dir) or {}
                 final_status = status or final_status
                 live.update(render_readout(out_dir, stats, status, system_info()))
-                last_master_mtime = _refresh_desktop_master(out_dir, last_master_mtime)
+                new_mtime = _refresh_desktop_master(out_dir, last_master_mtime)
+                dash_proc = _maybe_rebuild_dashboard(
+                    software_dir, out_dir, new_mtime, last_master_mtime, dash_proc
+                )
+                last_master_mtime = new_mtime
                 state = status.get("state")
                 if state in ("finished", "stopped") and not worker_running(out_dir):
                     break
@@ -998,9 +1125,11 @@ def live_readout(out_dir, refresh_secs=3):
     return final_status
 
 
-def _plain_readout(out_dir, refresh_secs):
+def _plain_readout(out_dir, software_dir=None, refresh_secs=3):
     """Fallback readout without rich: periodic one-line status."""
     stats = StatsAccumulator()
+    last_master_mtime = None
+    dash_proc = None
     final_status = None
     try:
         while True:
@@ -1013,6 +1142,11 @@ def _plain_readout(out_dir, refresh_secs):
                     f"({status.get('true_pct', 0):.1f}%) | "
                     f"blanks {stats.blank_pct():.1f}% | {absolute_eta(status.get('eta_seconds'))}"
                 )
+            new_mtime = _refresh_desktop_master(out_dir, last_master_mtime)
+            dash_proc = _maybe_rebuild_dashboard(
+                software_dir, out_dir, new_mtime, last_master_mtime, dash_proc
+            )
+            last_master_mtime = new_mtime
             if status.get("state") in ("finished", "stopped") and not worker_running(out_dir):
                 break
             time.sleep(refresh_secs)
@@ -1030,6 +1164,21 @@ def _refresh_desktop_master(out_dir, last_mtime):
     if mtime != last_mtime:
         copy_file(master, os.path.join(DESKTOP_DIR, DESKTOP_MASTER))
     return mtime
+
+
+def _maybe_rebuild_dashboard(software_dir, out_dir, new_mtime, last_mtime, dash_proc):
+    """Rebuild the dashboard in the background when the master has changed.
+
+    Skips if no software dir, if a previous build is still running, or if free
+    memory is low. Returns the (possibly new) background process handle.
+    """
+    if not software_dir or new_mtime == last_mtime:
+        return dash_proc
+    if dash_proc is not None and dash_proc.poll() is None:
+        return dash_proc  # a build is still in progress; do not overlap
+    if not enough_memory_for_dashboard():
+        return dash_proc  # too little free RAM right now; the next change retries
+    return spawn_dashboard(software_dir, out_dir) or dash_proc
 
 
 ####################################################################################
@@ -1057,6 +1206,7 @@ def build_arg_parser():
     parser.add_argument("--rescan", action="store_true", help="Force a fresh total count, ignoring the cache.")
     parser.add_argument("--yes", action="store_true", help="Accept defaults without prompting (non-interactive).")
     parser.add_argument("--attach", action="store_true", help="Attach to the live readout of a running worker and exit.")
+    parser.add_argument("--dashboard", action="store_true", help="Build and open the dashboard from the current results, then exit.")
     parser.add_argument("--no-update", action="store_true", help="Skip the self-update check this launch.")
     parser.add_argument("--update-check", choices=("auto", "never"), default=None,
                         help="Persist the update-check preference (auto or never; default: auto).")
@@ -1082,18 +1232,34 @@ def main(argv=None):
     # Stage 0: self-update (before any work). Never under a live worker.
     self_update_check(args, _HERE, worker_running(out_dir))
 
+    # Dashboard-only mode: build (and open) the dashboard from current results.
+    if args.dashboard:
+        print("Building the dashboard from the current results...")
+        html = build_dashboard(software_dir, out_dir, open_after=True)
+        if html:
+            print(f"Dashboard: {html}")
+            return 0
+        print("Could not build the dashboard (is there any output yet?).")
+        return 1
+
     # Attach mode: just show the readout of a running worker.
     if args.attach:
         if not worker_running(out_dir):
             print("No running worker to attach to.")
             return 1
-        live_readout(out_dir)
+        final = live_readout(out_dir, software_dir=software_dir)
+        if final and final.get("state") == "finished" and not worker_running(out_dir):
+            print("Run finished.")
+            finish_outputs(out_dir, software_dir)
         return 0
 
     # Single instance (A10): if a worker is already running, reattach.
     if worker_running(out_dir):
         print("A worker is already running; attaching to its live readout.")
-        live_readout(out_dir)
+        final = live_readout(out_dir, software_dir=software_dir)
+        if final and final.get("state") == "finished" and not worker_running(out_dir):
+            print("Run finished.")
+            finish_outputs(out_dir, software_dir)
         return 0
 
     found = stage_find_source(args)
@@ -1127,13 +1293,14 @@ def supervise(software_dir, source, out_dir, params, args):
             f"{os.path.join(out_dir, 'deepfaune_batch.p0.log')}"
         )
         print("You can close this window or disconnect; the run continues.")
-        final = live_readout(out_dir)
+        final = live_readout(out_dir, software_dir=software_dir)
         if worker_running(out_dir):
             print("Detached; the worker is still running. Re-run dfrun to reattach.")
             return
         state = (final or {}).get("state")
         if state == "finished":
-            finish_outputs(out_dir)
+            print("Run finished.")
+            finish_outputs(out_dir, software_dir)
             return
         if (args.watchdog and retries < args.max_retries
                 and os.path.isdir(source) and looks_like_archive(source)):
@@ -1147,12 +1314,13 @@ def supervise(software_dir, source, out_dir, params, args):
                 )
                 continue
         print("Worker stopped early. Re-run the tool to resume from where it left off.")
+        finish_outputs(out_dir, software_dir)  # build outputs/dashboard from what is done
         return
 
 
-def finish_outputs(out_dir):
-    """Stage 7: copy the master and write spreadsheet-friendly files to Desktop."""
-    print("Run finished. Writing spreadsheet-friendly outputs to the Desktop...")
+def finish_outputs(out_dir, software_dir):
+    """Stage 7: write the Desktop outputs and build (and open) the dashboard."""
+    print("Writing the spreadsheet-friendly outputs to the Desktop...")
     master = os.path.join(out_dir, MASTER_NAME)
     if not os.path.exists(master):
         dfb.merge_csvs(out_dir, master)
@@ -1161,7 +1329,13 @@ def finish_outputs(out_dir):
     print(f"  {DESKTOP_MASTER}: full master (exceeds Excel's row limit; not spreadsheet-friendly)")
     print(f"  {DESKTOP_WILDLIFE}: {rows:,} wildlife rows" + (" (capped to Excel's limit)" if capped else ""))
     print(f"  {DESKTOP_SUMMARY}: {n_species} species, {n_stations} stations")
-    print("Open the wildlife and summary files in a spreadsheet; the master is for tools that handle large CSVs.")
+    print("Building the dashboard (this can take a few minutes on the full archive)...")
+    html = build_dashboard(software_dir, out_dir, open_after=True)
+    if html:
+        print(f"  {DESKTOP_DASHBOARD}: opened in your browser")
+    else:
+        print("  dashboard not built (see dashboard.log); the CSVs are still available")
+    print("Open the wildlife and summary files in a spreadsheet; the dashboard opens in a browser.")
 
 
 if __name__ == "__main__":

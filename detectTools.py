@@ -183,6 +183,13 @@ class Detector:
             self.yolo = MDRedwood(MDRYOLO_WEIGHTS, MDRYOLO_WIDTH, MDRYOLO_THRES, device=device)
 
     def bestBoxDetection(self, filename_or_imagecv):
+        # Raw per-category detector confidence for the image just processed:
+        # the best (highest) box confidence for each YOLO category, regardless
+        # of which single box is selected below. Zero means "no box found" for
+        # that category (or an unreadable image). Read by the batch pipeline
+        # (predictTools.PredictorImageBase.nextBatch) right after this call;
+        # the return signature is unchanged so other callers are unaffected.
+        self.lastconf = {"animal": 0.0, "human": 0.0, "vehicle": 0.0}
         try:
             results = self.yolo(filename_or_imagecv, device=self.device)
         except FileNotFoundError:
@@ -201,6 +208,12 @@ class Detector:
         # orig_img a numpy array (cv2) in BGR
         imagecv = results[0].cpu().orig_img
         detection = results[0].cpu().numpy().boxes
+
+        # Record the best confidence per category (0=animal, 1=person, 2=vehicle).
+        for clsidx, key in enumerate(("animal", "human", "vehicle")):
+            mask = (detection.cls == clsidx)
+            if mask.any():
+                self.lastconf[key] = float(detection.conf[mask].max())
 
         # Are there any relevant boxes?
         if not len(detection.cls):

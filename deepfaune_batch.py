@@ -58,16 +58,42 @@ DETECTOR_CHOICES = ["DF", "MDS", "DFbsMDS", "DFMDS", "MDR"]
 # English labels to Romanian downstream if FCC needs it).
 LANG_CHOICES = ["fr", "en", "it", "de", "es"]
 
+# English animal class labels in engine (index) order: a stdlib-only copy of
+# classifTools.txt_animalclasses['en'], so dfrun and argument validation can
+# list and check class names without importing torch. run() verifies this
+# against the real engine list at startup and refuses to run on any drift.
+ANIMAL_CLASSES_EN = [
+    "bison", "badger", "ibex", "beaver", "red deer", "golden jackal",
+    "chamois", "cat", "goat", "roe deer", "dog", "raccoon dog", "fallow deer",
+    "squirrel", "moose", "equid", "genet", "wolverine", "hedgehog",
+    "lagomorph", "wolf", "otter", "lynx", "marmot", "micromammal", "mouflon",
+    "sheep", "mustelid", "bird", "bear", "porcupine", "nutria", "muskrat",
+    "raccoon", "fox", "reindeer", "wild boar", "cow",
+]
+
+# Fixed (non-per-class) columns of a shard CSV, in order. The engine turns a
+# below-threshold prediction into "undefined" but keeps the score, so the
+# top1_* columns preserve the label that scored best and "above_threshold"
+# says whether the sequence prediction passed the run's threshold. The
+# det_conf_* columns are the detector's best box confidence per category. A
+# full shard header also carries one raw softmax score column per animal class
+# (and per bird subclass when the bird head is on) — see full_csv_header().
 CSV_HEADER = [
     "filename",
     "date",
     "seqnum",
     "prediction_seq",
+    "top1_seq",
     "score_seq",
+    "above_threshold",
     "prediction_image",
+    "top1_image",
     "score_image",
     "animal_count",
     "human_count",
+    "det_conf_animal",
+    "det_conf_human",
+    "det_conf_vehicle",
 ]
 
 # A shard CSV is named "<sanitised-relpath>__<8 hex>.csv" by shard_csv_name.
@@ -172,6 +198,37 @@ def shard_csv_name(root, leaf_dir):
     return f"{safe}__{digest}.csv"
 
 
+def parse_excluded_classes(text):
+    """Parse a comma-separated list of English animal class names to exclude.
+
+    Returns (names, error): names are canonical labels from ANIMAL_CLASSES_EN
+    (matched case-insensitively, whitespace normalised, duplicates dropped,
+    engine order preserved); error is None on success, else a message naming
+    the entries that are not animal classes. Blank text means no exclusions.
+    """
+    if not text or not text.strip():
+        return [], None
+    lookup = {c.lower(): c for c in ANIMAL_CLASSES_EN}
+    names = []
+    unknown = []
+    for part in text.split(","):
+        key = " ".join(part.split()).lower()
+        if not key:
+            continue
+        canonical = lookup.get(key)
+        if canonical is None:
+            unknown.append(part.strip() or "(blank)")
+        elif canonical not in names:
+            names.append(canonical)
+    if unknown:
+        return None, (
+            "unknown animal classes: " + ", ".join(unknown)
+            + " (choose from: " + ", ".join(sorted(ANIMAL_CLASSES_EN)) + ")"
+        )
+    names.sort(key=ANIMAL_CLASSES_EN.index)
+    return names, None
+
+
 def plan_shards(shards, out_dir, root, rescan):
     """Filter shards down to those still needing work (resume behaviour).
 
@@ -250,20 +307,78 @@ def iter_shard_csvs(out_dir, exclude=()):
         yield path
 
 
-def merge_csvs(out_dir, merge_out, header=CSV_HEADER):
+def sanitize_column(name):
+    """Turn a class label into a safe CSV column suffix (spaces -> underscores)."""
+    return re.sub(r"[^A-Za-z0-9]+", "_", str(name).strip()).strip("_")
+
+
+def full_csv_header(animal_classes, bird_classes=()):
+    """The complete shard CSV header for a run.
+
+    The fixed columns come first, then one raw softmax score column per animal
+    class ("score_<class>") and, when the bird head is active, one per bird
+    subclass ("birdscore_<class>"). Class labels are in the run language.
+    """
+    header = list(CSV_HEADER)
+    header += ["score_" + sanitize_column(c) for c in animal_classes]
+    header += ["birdscore_" + sanitize_column(c) for c in bird_classes or ()]
+    return header
+
+
+def read_csv_header(path):
+    """Return the header row of a CSV file, or None if unreadable/empty."""
+    try:
+        with open(path, newline="", encoding="utf-8") as handle:
+            return next(csv.reader(handle), None)
+    except OSError:
+        return None
+
+
+def shard_header_union(out_dir, exclude=()):
+    """The union of the shard CSV headers in out_dir, as one ordered list.
+
+    Shards written by different versions of this tool can carry different
+    columns (older runs lack the per-class score columns). The widest header
+    seen supplies the base order; any column it lacks is appended in
+    first-seen order. Falls back to CSV_HEADER when no shard exists yet.
+    """
+    headers = []
+    for path in iter_shard_csvs(out_dir, exclude=exclude):
+        header = read_csv_header(path)
+        if header:
+            headers.append(header)
+    if not headers:
+        return list(CSV_HEADER)
+    columns = list(max(headers, key=len))  # first-seen widest header wins ties
+    seen = set(columns)
+    for header in headers:
+        for col in header:
+            if col not in seen:
+                columns.append(col)
+                seen.add(col)
+    return columns
+
+
+def merge_csvs(out_dir, merge_out, header=None):
     """Stream-concatenate the per-shard CSVs in out_dir into merge_out.
 
-    The header is written once; each source file's own header row is dropped and
-    its data rows are copied through csv.writer so quoting stays correct. Files
-    are streamed, not loaded whole. The write is atomic (temp then rename) and
-    merge_out is excluded from the inputs, so this is an idempotent rebuild that
-    never appends. Returns (n_files, n_rows).
+    The header is written once; each source file's own header row is read and
+    its data rows are re-mapped into the output columns by column NAME, so
+    shards written by different tool versions (for example old shards without
+    the per-class score columns) merge cleanly, with missing cells left blank.
+    When header is None (the default) the union of the shard headers is used.
+    Rows go through csv.writer so quoting stays correct, and files are
+    streamed, not loaded whole. The write is atomic (temp then rename) and
+    merge_out is excluded from the inputs, so this is an idempotent rebuild
+    that never appends. Returns (n_files, n_rows).
     """
     out_dir = os.path.abspath(out_dir)
     merge_out = os.path.abspath(merge_out)
     directory = os.path.dirname(merge_out) or "."
     os.makedirs(directory, exist_ok=True)
     sources = list(iter_shard_csvs(out_dir, exclude=[merge_out]))
+    if header is None:
+        header = shard_header_union(out_dir, exclude=[merge_out])
     fd, tmp = tempfile.mkstemp(
         dir=directory, prefix=os.path.basename(merge_out) + ".", suffix=".tmp"
     )
@@ -277,12 +392,24 @@ def merge_csvs(out_dir, merge_out, header=CSV_HEADER):
                 with open(src, newline="", encoding="utf-8") as handle:
                     reader = csv.reader(handle)
                     try:
-                        next(reader)  # drop this file's header row
+                        src_header = next(reader)
                     except StopIteration:
                         continue  # empty file
                     n_files += 1
+                    if src_header == header:
+                        # Fast path: columns already line up; copy rows through.
+                        for row in reader:
+                            writer.writerow(row)
+                            n_rows += 1
+                        continue
+                    # Re-map by column name; absent columns stay blank.
+                    positions = {col: i for i, col in enumerate(src_header)}
+                    indices = [positions.get(col) for col in header]
                     for row in reader:
-                        writer.writerow(row)
+                        writer.writerow([
+                            row[i] if i is not None and i < len(row) else ""
+                            for i in indices
+                        ])
                         n_rows += 1
             out.flush()
             os.fsync(out.fileno())
@@ -480,6 +607,9 @@ def build_run_metadata(out_dir, software_dir, root, args):
         "threshold": args.threshold,
         "maxlag": args.maxlag,
         "birds": args.birds,
+        "excluded_classes": parse_excluded_classes(
+            getattr(args, "exclude_classes", "")
+        )[0] or [],
         "lang": args.lang,
         "batch_size": args.batch_size,
         "deepfaune_version": read_deepfaune_version(software_dir),
@@ -603,41 +733,74 @@ def install_shared_models(predict_tools, classif_tools, detect_tools,
     return classifier, detector
 
 
+def _fmt_score(value):
+    """Format a raw score cell: 4 decimals, or blank for NaN (no animal crop)."""
+    value = float(value)
+    if value != value:  # NaN: the classifier never ran on this image
+        return ""
+    return f"{value:.4f}"
+
+
 def build_rows(predictor):
-    """Read a finished predictor and assemble the per-image CSV rows."""
+    """Read a finished predictor and assemble the per-image CSV rows.
+
+    Row layout matches full_csv_header(): the fixed columns, then one raw
+    softmax score per animal class, then (bird head only) one per bird
+    subclass. The top1_* columns keep the best-scoring label even when the
+    score is below the classification threshold (where prediction_* becomes
+    "undefined"), and above_threshold records whether the sequence prediction
+    passed the threshold — so results can be re-thresholded after the run.
+    """
     seq_class, seq_score, _boxes, count = predictor.getPredictions()
-    img_class, img_score, _boxes2, _count2 = predictor.getPredictionsBase()
+    seq_top1 = predictor.getPredictedTop1()
+    img_class, img_score, img_top1 = predictor.getPredictionsBaseAll()
+    detconf = predictor.getDetectionConfs()
+    animal_scores, bird_scores = predictor.getClassScores()
     dates = predictor.getDates()
     seqnums = predictor.getSeqnums()
     filenames = predictor.getFilenames()
     humancount = predictor.getHumanCount()
     rows = []
     for k in range(len(filenames)):
-        rows.append(
-            [
-                filenames[k],
-                dates[k],
-                int(seqnums[k]),
-                seq_class[k],
-                seq_score[k],
-                img_class[k],
-                img_score[k],
-                int(count[k]),
-                int(humancount[k]),
-            ]
-        )
+        # Below threshold the engine rewrites the class to "undefined" but
+        # keeps top1 as the winning label, so equality means "passed".
+        above = "yes" if seq_class[k] == seq_top1[k] else "no"
+        row = [
+            filenames[k],
+            dates[k],
+            int(seqnums[k]),
+            seq_class[k],
+            seq_top1[k],
+            seq_score[k],
+            above,
+            img_class[k],
+            img_top1[k],
+            img_score[k],
+            int(count[k]),
+            int(humancount[k]),
+            f"{float(detconf[k][0]):.4f}",
+            f"{float(detconf[k][1]):.4f}",
+            f"{float(detconf[k][2]):.4f}",
+        ]
+        row += [_fmt_score(v) for v in animal_scores[k]]
+        if bird_scores is not None:
+            row += [_fmt_score(v) for v in bird_scores[k]]
+        rows.append(row)
     return rows
 
 
 def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
                   batch_size, detector_name, stopper, heartbeat_secs, progress,
-                  shard_label, report=None):
+                  shard_label, report=None, excluded_lang=()):
     """Run the engine over one shard.
 
     Returns the list of CSV rows, or None if a stop was requested mid-shard (in
     which case nothing is written and the shard is redone on resume). The rate
     tracker is fed every batch so throughput and ETA update continuously, and
     the optional report callback refreshes the status file on each heartbeat.
+    excluded_lang are animal class labels IN THE RUN LANGUAGE the classifier
+    must never predict (the engine drops them from the candidate set; their
+    raw score columns are still recorded).
     """
     predictor = predict_tools.PredictorImage(
         image_paths,
@@ -649,6 +812,8 @@ def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
         detectorname=detector_name,
         device=DEVICE,
     )
+    if excluded_lang:
+        predictor.setForbiddenAnimalClasses(list(excluded_lang))
     total = len(image_paths)
     predictor.resetBatch()
     last_hb = time.monotonic()
@@ -720,6 +885,9 @@ def validate_common(args):
         return f"--threshold must satisfy 0 < t <= 1 (got {args.threshold})"
     if args.heartbeat_secs < 0:
         return f"--heartbeat-secs must be >= 0 (got {args.heartbeat_secs})"
+    _, err = parse_excluded_classes(getattr(args, "exclude_classes", ""))
+    if err:
+        return f"--exclude-classes: {err}"
     if args.merge_every < 0:
         return f"--merge-every must be >= 0 (got {args.merge_every})"
     if args.max_images is not None and args.max_images < 1:
@@ -884,6 +1052,34 @@ def run(args):
     )
     LOG.info("Models loaded in %.1fs", time.monotonic() - t0)
 
+    # The stdlib copy of the class list must match the engine exactly, or the
+    # exclusion numbers/names shown by dfrun would silently mean the wrong
+    # species. Refuse to run on any drift.
+    if list(predictTools.txt_animalclasses["en"]) != ANIMAL_CLASSES_EN:
+        LOG.error(
+            "ANIMAL_CLASSES_EN is out of date with classifTools "
+            "txt_animalclasses['en']; update deepfaune_batch.py"
+        )
+        return 2
+
+    # Excluded (impossible) species: validated names in English, converted to
+    # the run language for the engine's forbidden-class filter.
+    excluded_en, _err = parse_excluded_classes(args.exclude_classes)
+    excluded_lang = [
+        predictTools.txt_animalclasses[args.lang][ANIMAL_CLASSES_EN.index(name)]
+        for name in excluded_en
+    ]
+    if excluded_en:
+        LOG.info("excluded classes: %s", ", ".join(excluded_en))
+
+    # The shard CSV header for this run: the fixed columns plus one raw score
+    # column per animal class (and per bird subclass when the bird head is on),
+    # named in the run language.
+    run_header = full_csv_header(
+        predictTools.txt_animalclasses[args.lang],
+        predictTools.txt_birdclasses[args.lang] if args.birds else (),
+    )
+
     # Record images the engine cannot read to a sidecar so they can be audited,
     # and keep a running count rather than letting a bad file abort the run.
     unreadable_path = os.path.join(out_dir, "unreadable_images.txt")
@@ -993,10 +1189,11 @@ def run(args):
             detector_name=args.detector, stopper=stopper,
             heartbeat_secs=args.heartbeat_secs, progress=progress,
             shard_label=shard_label, report=report,
+            excluded_lang=excluded_lang,
         )
         if rows is None:  # aborted mid-shard by a signal
             break
-        atomic_write_csv(csv_path, CSV_HEADER, rows)
+        atomic_write_csv(csv_path, run_header, rows)
         progress.complete_shard(len(image_paths))
         processed += 1
         LOG.info(
@@ -1078,6 +1275,13 @@ def build_arg_parser():
     parser.add_argument(
         "--birds", action="store_true",
         help="Enable the 8-way bird sub-classifier head.",
+    )
+    parser.add_argument(
+        "--exclude-classes", default="",
+        help="Comma-separated English animal class names the classifier must "
+             "never predict (impossible species for the survey area), e.g. "
+             "'ibex,marmot,genet'. Raw per-class scores are still recorded "
+             "for excluded classes; only the prediction is constrained.",
     )
     parser.add_argument(
         "--batch-size", type=int, default=8,

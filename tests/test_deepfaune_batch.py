@@ -464,6 +464,182 @@ def test_merge_csvs_excludes_master_and_is_idempotent(tmp_path):
     assert len(rows) == 2  # header + one data row
 
 
+# The shard header written by versions before the raw-score columns existed.
+OLD_CSV_HEADER = [
+    "filename", "date", "seqnum", "prediction_seq", "score_seq",
+    "prediction_image", "score_image", "animal_count", "human_count",
+]
+
+
+def test_merge_csvs_maps_mixed_schemas_by_column_name(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    # An old shard (pre raw-score columns) alongside a new full-schema shard.
+    new_header = dfb.full_csv_header(["wolf", "lynx"], ["corvid"])
+    with open(out / "old__0a1b2c3d.csv", "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(OLD_CSV_HEADER)
+        writer.writerow(["/a/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0])
+    with open(out / "new__1a2b3c4d.csv", "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(new_header)
+        writer.writerow(
+            ["/b/2.jpg", "d", 1, "lynx", "lynx", 0.8, "yes", "lynx", "lynx",
+             0.8, 1, 0, "0.9000", "0.0000", "0.0000", "0.1000", "0.9000", ""]
+        )
+
+    merge_out = out / "master.csv"
+    n_files, n_rows = dfb.merge_csvs(str(out), str(merge_out))
+    assert (n_files, n_rows) == (2, 2)
+    with open(merge_out, newline="", encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
+    # The widest header supplies the column order (old is a subset of new).
+    assert rows[0] == new_header
+    by_file = {r[0]: dict(zip(rows[0], r)) for r in rows[1:]}
+    old = by_file["/a/1.jpg"]
+    assert old["prediction_seq"] == "wolf"  # re-mapped by name, not position
+    assert old["score_seq"] == "0.9"
+    assert old["top1_seq"] == ""  # absent in the old schema: left blank
+    assert old["score_wolf"] == ""
+    new = by_file["/b/2.jpg"]
+    assert new["above_threshold"] == "yes"
+    assert new["score_lynx"] == "0.9000"
+    assert new["det_conf_animal"] == "0.9000"
+
+
+def test_shard_header_union_falls_back_to_base_header(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()  # no shards at all
+    assert dfb.shard_header_union(str(out)) == dfb.CSV_HEADER
+
+
+def test_full_csv_header_sanitises_class_names():
+    header = dfb.full_csv_header(["wild boar", "red deer"], ["corvid"])
+    assert header == dfb.CSV_HEADER + [
+        "score_wild_boar", "score_red_deer", "birdscore_corvid",
+    ]
+    # Without the bird head there are no birdscore columns.
+    assert dfb.full_csv_header(["cat"]) == dfb.CSV_HEADER + ["score_cat"]
+
+
+# ---------------------------------------------------------------------------
+# impossible-species exclusion (--exclude-classes)
+# ---------------------------------------------------------------------------
+def test_parse_excluded_classes():
+    # Case-insensitive, whitespace-tolerant, dupes dropped, engine order kept.
+    names, err = dfb.parse_excluded_classes(" Marmot , ibex,  WILD  BOAR ,ibex")
+    assert err is None
+    assert names == ["ibex", "marmot", "wild boar"]  # engine index order
+    assert dfb.parse_excluded_classes("") == ([], None)
+    assert dfb.parse_excluded_classes("  ,  ") == ([], None)
+    names, err = dfb.parse_excluded_classes("ibex,dragon,unicorn")
+    assert names is None
+    assert "dragon" in err and "unicorn" in err and "choose from" in err
+
+
+def test_validate_common_rejects_unknown_excluded_class():
+    args = _args(exclude_classes="wolf,dragon")
+    err = dfb.validate_common(args)
+    assert err is not None and "--exclude-classes" in err and "dragon" in err
+    assert dfb.validate_common(_args(exclude_classes="wolf, lynx")) is None
+
+
+def test_run_metadata_records_excluded_classes(tmp_path):
+    sw = tmp_path / "sw"
+    sw.mkdir()
+    out = tmp_path / "out"
+    out.mkdir()
+    args = _args(exclude_classes="marmot,ibex", partition=0)
+    _path, meta = dfb.write_run_metadata(str(out), str(sw), "/root", args)
+    assert meta["excluded_classes"] == ["ibex", "marmot"]
+
+
+def test_animal_classes_en_matches_engine():
+    """The stdlib copy must track classifTools exactly (skips without torch)."""
+    classifTools = pytest.importorskip("classifTools")
+    assert dfb.ANIMAL_CLASSES_EN == list(classifTools.txt_animalclasses["en"])
+
+
+# ---------------------------------------------------------------------------
+# per-image CSV rows (build_rows against a stub predictor; no torch needed)
+# ---------------------------------------------------------------------------
+class _StubPredictor:
+    """Minimal stand-in exposing the getters build_rows reads.
+
+    Image 0: a confident wolf. Image 1: below-threshold (prediction rewritten
+    to "undefined" but top1 kept). Image 2: empty (no animal crop, NaN scores).
+    """
+
+    def __init__(self):
+        nan = float("nan")
+        self._files = ["/a/1.jpg", "/a/2.jpg", "/a/3.jpg"]
+        self._seq = (["wolf", "undefined", "empty"],
+                     [0.97, 0.41, 1.0], None, [1, 1, 0])
+        self._top1 = ["wolf", "lynx", "empty"]
+        self._img = (["wolf", "undefined", "empty"], [0.95, 0.4, 1.0],
+                     ["wolf", "lynx", "empty"])
+        self._detconf = [[0.91, 0.0, 0.0], [0.52, 0.0, 0.0], [0.0, 0.0, 0.0]]
+        self._scores = [[0.95, 0.05], [0.4, 0.6], [nan, nan]]
+        self._bird = [[0.7, 0.3], [0.5, 0.5], [nan, nan]]
+
+    def getPredictions(self):
+        return self._seq
+
+    def getPredictedTop1(self):
+        return self._top1
+
+    def getPredictionsBaseAll(self):
+        return self._img
+
+    def getDetectionConfs(self):
+        return self._detconf
+
+    def getClassScores(self):
+        return self._scores, self._bird
+
+    def getDates(self):
+        return ["d1", "d2", "d3"]
+
+    def getSeqnums(self):
+        return [1, 2, 3]
+
+    def getFilenames(self):
+        return self._files
+
+    def getHumanCount(self):
+        return [0, 0, 0]
+
+
+def test_build_rows_full_schema():
+    rows = dfb.build_rows(_StubPredictor())
+    header = dfb.full_csv_header(["wolf", "lynx"], ["corvid", "raptor"])
+    assert all(len(r) == len(header) for r in rows)
+    r0, r1, r2 = (dict(zip(header, r)) for r in rows)
+    # Above threshold: prediction equals top1.
+    assert (r0["prediction_seq"], r0["top1_seq"], r0["above_threshold"]) == \
+        ("wolf", "wolf", "yes")
+    assert r0["score_wolf"] == "0.9500"
+    assert r0["det_conf_animal"] == "0.9100"
+    # Below threshold: label preserved in top1, flagged "no", scores kept.
+    assert (r1["prediction_seq"], r1["top1_seq"], r1["above_threshold"]) == \
+        ("undefined", "lynx", "no")
+    assert r1["score_lynx"] == "0.6000"
+    assert r1["birdscore_corvid"] == "0.5000"
+    # Empty image: no crop, so class-score cells are blank, det confs zero.
+    assert (r2["above_threshold"], r2["score_wolf"], r2["birdscore_raptor"]) == \
+        ("yes", "", "")
+    assert r2["det_conf_animal"] == "0.0000"
+
+
+def test_build_rows_without_bird_head():
+    stub = _StubPredictor()
+    stub._bird = None
+    stub.getClassScores = lambda: (stub._scores, None)
+    rows = dfb.build_rows(stub)
+    header = dfb.full_csv_header(["wolf", "lynx"])
+    assert all(len(r) == len(header) for r in rows)
+
+
 def test_iter_shard_csvs_filters_and_excludes(tmp_path):
     out = tmp_path / "out"
     out.mkdir()

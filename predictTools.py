@@ -85,6 +85,9 @@ class PredictorBase(ABC):
         self.predictedtop1 = [""]*self.fileManager.nbFiles()
         self.predictedscore = [0.]*self.fileManager.nbFiles()
         self.bestboxes = np.zeros(shape=(self.fileManager.nbFiles(), 4), dtype=np.float32)
+        # Raw detector confidence per image and category (animal, human,
+        # vehicle), filled from the detector's lastconf when available.
+        self.detectionconf = np.zeros(shape=(self.fileManager.nbFiles(), 3), dtype=np.float32)
         self.count = [0]*self.fileManager.nbFiles()
         self.humancount = [0]*self.fileManager.nbFiles()
         self.resetBatch()
@@ -161,7 +164,66 @@ class PredictorBase(ABC):
 
     def getTxtClasses(self):
         return self.txt_classes_lang
-    
+
+    def getDetectionConfs(self):
+        """Raw detector confidences, one row per image.
+
+        Columns are (animal, human, vehicle): the best box confidence the
+        detector found for each category, before the single-box selection and
+        the animal-priority rule. Zero means no box of that category was found
+        (or the image was unreadable).
+        """
+        return self.detectionconf
+
+    def getAnimalClassesLang(self):
+        """The animal class labels, in the run language, in prediction order."""
+        return list(txt_animalclasses[self.LANG])
+
+    def getBirdClassesLang(self):
+        """The bird subclass labels if the bird head is active, else []."""
+        if isinstance(self.classifier, ClassifierWithBirds):
+            return list(txt_birdclasses[self.LANG])
+        return []
+
+    def getClassScores(self):
+        """Per-image raw softmax scores over all animal classes (and, when the
+        bird head is active, over the bird subclasses).
+
+        Returns (animalscores, birdscores): float32 arrays of shape
+        (nbFiles, n_animal) and (nbFiles, n_bird); birdscores is None without
+        the bird head. Rows where the detector found no animal (empty, human
+        or vehicle) are NaN: there was no crop, so the classifier never ran.
+        Scores use the same image-level temperatures as the engine's own
+        scoring (1.10 for the animal head, 0.9 for the bird head), so the max
+        of an animal row equals the engine's image-level score before its
+        2-decimal truncation. Scores are reported for every classified image
+        regardless of the classification threshold. A bird row is the
+        conditional distribution over bird types (meaningful when the animal
+        is a bird).
+        """
+        nanimal = len(txt_animalclasses[self.LANG])
+        idxanimal = list(range(nanimal))
+        nfiles = self.fileManager.nbFiles()
+        animalscores = np.full((nfiles, nanimal), np.nan, dtype=np.float32)
+        withbirds = isinstance(self.classifier, ClassifierWithBirds)
+        if withbirds:
+            idxbird = list(range(nanimal, self.idxhuman))
+            birdscores = np.full((nfiles, len(idxbird)), np.nan, dtype=np.float32)
+        else:
+            birdscores = None
+        for k in range(nfiles):
+            row = self.prediction[k,]
+            if row[-1]>0 or row[self.idxhuman]>0 or row[self.idxvehicle]>0:
+                continue # empty, human or vehicle: the classifier never ran
+            logits = row[idxanimal]/1.10 # image-level temperature
+            expl = np.exp(logits-logits.max()) # numerically stable softmax
+            animalscores[k] = expl/expl.sum()
+            if withbirds:
+                blogits = row[idxbird]/0.9 # bird-head temperature
+                bexpl = np.exp(blogits-blogits.max())
+                birdscores[k] = bexpl/bexpl.sum()
+        return animalscores, birdscores
+
     def setForbiddenAnimalClasses(self, forbiddenanimalclasses):
         # index of fobidden classes, only animal classes
         # that are at the beginning of the classes list
@@ -241,6 +303,11 @@ class PredictorImageBase(PredictorBase):
             rangeanimal = []
             for k in range(self.k1,self.k2):
                 croppedimage, category, box, count, humanboxes = self.detector.bestBoxDetection(self.fileManager.getFilename(k))
+                lastconf = getattr(self.detector, "lastconf", None)
+                if lastconf is not None: # raw per-category detector confidence
+                    self.detectionconf[k, 0] = lastconf.get("animal", 0.)
+                    self.detectionconf[k, 1] = lastconf.get("human", 0.)
+                    self.detectionconf[k, 2] = lastconf.get("vehicle", 0.)
                 self.bestboxes[k] = box
                 self.count[k] = count
                 if category > 0: # not empty
@@ -282,6 +349,19 @@ class PredictorImageBase(PredictorBase):
             for k in range(0,self.fileManager.nbFiles()):
                 predictedclass_base[k], predictedscore_base[k], _ = self._PredictorBase__averageLogitInSequence(self.prediction[k:(k+1),])
             return predictedclass_base, predictedscore_base, self.bestboxes, self.count
+
+    def getPredictionsBaseAll(self):
+        """Like getPredictionsBase() but also returns the per-image top-1 label,
+        which is kept even when the score falls below the classification
+        threshold (where the prediction itself becomes 'undefined')."""
+        nfiles = self.fileManager.nbFiles()
+        predictedclass_base = [""]*nfiles
+        predictedscore_base = [0.]*nfiles
+        predictedtop1_base = [""]*nfiles
+        for k in range(0,nfiles):
+            predictedclass_base[k], predictedscore_base[k], predictedtop1_base[k] = \
+                self._PredictorBase__averageLogitInSequence(self.prediction[k:(k+1),])
+        return predictedclass_base, predictedscore_base, predictedtop1_base
 
     def setPredictedClassInSequence(self, k, label, score=1.0):
         self.setPredictedClass(k, label, score)

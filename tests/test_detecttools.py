@@ -148,3 +148,55 @@ def test_skipped_image_hook_ignores_non_filename():
     finally:
         detectTools.skipped_image_hook = None
     assert recorded == []
+
+
+# ---------------------------------------------------------------------------
+# raw per-category detection confidences (Detector.lastconf)
+# ---------------------------------------------------------------------------
+class _FakeBoxes:
+    def __init__(self, cls, conf, xyxy):
+        self.cls = np.array(cls, dtype=float)
+        self.conf = np.array(conf, dtype=float)
+        self.xyxy = np.array(xyxy, dtype=float)
+
+
+class _FakeNumpy:
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+
+class _FakeCPU:
+    def __init__(self, boxes, orig_img):
+        self._boxes = boxes
+        self.orig_img = orig_img
+
+    def numpy(self):
+        return _FakeNumpy(self._boxes)
+
+
+class _FakeResult:
+    def __init__(self, boxes, orig_img=None):
+        self._cpu = _FakeCPU(boxes, orig_img)
+
+    def cpu(self):
+        return self._cpu
+
+
+def test_lastconf_records_best_confidence_per_category():
+    # Two human boxes and one vehicle box, no animal (categories 1 and 2).
+    boxes = _FakeBoxes(
+        cls=[1, 1, 2],
+        conf=[0.7, 0.9, 0.5],
+        xyxy=[[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]],
+    )
+    detector = _make_detector([_FakeResult(boxes, orig_img=np.zeros((4, 4, 3)))])
+    _, category, _, _, humanboxes = detector.bestBoxDetection("photo.jpg")
+    assert category == 2  # human wins: it is the first box
+    assert detector.lastconf == {"animal": 0.0, "human": 0.9, "vehicle": 0.5}
+    assert len(humanboxes) == 2
+
+
+def test_lastconf_zero_when_nothing_detected():
+    detector = _make_detector([])  # unreadable image
+    _assert_nothing_detected(detector.bestBoxDetection("corrupt.jpg"))
+    assert detector.lastconf == {"animal": 0.0, "human": 0.0, "vehicle": 0.0}

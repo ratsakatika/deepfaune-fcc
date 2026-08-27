@@ -690,9 +690,12 @@ def write_wildlife_and_summary(out_dir, desktop_dir):
     capped = False
     written = 0
     tmp = wildlife_path + ".tmp"
+    # Union of the shard headers, so per-class score columns (and any columns
+    # from older shards) all appear; missing cells are left blank per row.
+    header = dfb.shard_header_union(out_dir)
     with open(tmp, "w", newline="", encoding="utf-8") as out:
         writer = csv.writer(out)
-        writer.writerow(dfb.CSV_HEADER + ["station"])
+        writer.writerow(header + ["station"])
         for path in dfb.iter_shard_csvs(out_dir):
             try:
                 handle = open(path, newline="", encoding="utf-8")
@@ -710,7 +713,7 @@ def write_wildlife_and_summary(out_dir, desktop_dir):
                     stations[station] += 1
                     if written < EXCEL_ROW_LIMIT - 1:
                         writer.writerow(
-                            [row.get(col, "") for col in dfb.CSV_HEADER] + [station]
+                            [row.get(col, "") for col in header] + [station]
                         )
                         written += 1
                     else:

@@ -135,6 +135,38 @@ On the Desktop, for easy download:
 - `deepfaune_summary.csv` (per-species and per-station counts);
 - `deepfaune_dashboard.html` (interactive charts and a camera map; opens in a browser).
 
+### Result columns
+
+Each shard CSV (and therefore the master and wildlife files) has one row per
+image with the full raw model outputs, so the classification threshold can be
+changed retrospectively without re-running anything:
+
+- `filename`, `date`, `seqnum` - the image, its EXIF date, and the sequence
+  (detection event) it was grouped into.
+- `prediction_seq`, `top1_seq`, `score_seq`, `above_threshold` - the
+  sequence-level prediction the pipeline reports. Below the threshold the
+  engine rewrites `prediction_seq` to "undefined", but `top1_seq` keeps the
+  best-scoring label and `score_seq` its score, and `above_threshold`
+  (yes/no) says whether the threshold was passed - so no information is lost.
+- `prediction_image`, `top1_image`, `score_image` - the same, per single image
+  (no sequence averaging).
+- `animal_count`, `human_count` - counts of boxes found by the detector.
+- `det_conf_animal`, `det_conf_human`, `det_conf_vehicle` - the detector's raw
+  confidence: the best box confidence per category (0 = no box found).
+- `score_<class>` (one column per animal class) - the classifier's raw softmax
+  score over all animal classes for this image, recorded whatever the
+  threshold. Blank when the detector found no animal (the classifier never
+  ran: there was no crop to classify).
+- `birdscore_<class>` (one column per bird group, when birds is on) - the bird
+  sub-classifier's softmax; a conditional "which bird" distribution, only
+  meaningful when the animal is a bird.
+
+To re-threshold after the fact: take rows where the max of the `score_*`
+columns (or `score_seq`) clears your new cut-off, using `top1_seq` as the
+label. Shards written by older versions of the tool lack the raw-score
+columns; in the merged master those cells are simply blank. Re-run those
+folders with `deepfaune_batch.py --rescan` if you need their raw scores too.
+
 ## Dashboard
 
 `deepfaune_dashboard.html` is built from the Desktop master CSV by

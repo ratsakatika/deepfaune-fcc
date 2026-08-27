@@ -58,16 +58,29 @@ DETECTOR_CHOICES = ["DF", "MDS", "DFbsMDS", "DFMDS", "MDR"]
 # English labels to Romanian downstream if FCC needs it).
 LANG_CHOICES = ["fr", "en", "it", "de", "es"]
 
+# Fixed (non-per-class) columns of a shard CSV, in order. The engine turns a
+# below-threshold prediction into "undefined" but keeps the score, so the
+# top1_* columns preserve the label that scored best and "above_threshold"
+# says whether the sequence prediction passed the run's threshold. The
+# det_conf_* columns are the detector's best box confidence per category. A
+# full shard header also carries one raw softmax score column per animal class
+# (and per bird subclass when the bird head is on) — see full_csv_header().
 CSV_HEADER = [
     "filename",
     "date",
     "seqnum",
     "prediction_seq",
+    "top1_seq",
     "score_seq",
+    "above_threshold",
     "prediction_image",
+    "top1_image",
     "score_image",
     "animal_count",
     "human_count",
+    "det_conf_animal",
+    "det_conf_human",
+    "det_conf_vehicle",
 ]
 
 # A shard CSV is named "<sanitised-relpath>__<8 hex>.csv" by shard_csv_name.
@@ -250,20 +263,78 @@ def iter_shard_csvs(out_dir, exclude=()):
         yield path
 
 
-def merge_csvs(out_dir, merge_out, header=CSV_HEADER):
+def sanitize_column(name):
+    """Turn a class label into a safe CSV column suffix (spaces -> underscores)."""
+    return re.sub(r"[^A-Za-z0-9]+", "_", str(name).strip()).strip("_")
+
+
+def full_csv_header(animal_classes, bird_classes=()):
+    """The complete shard CSV header for a run.
+
+    The fixed columns come first, then one raw softmax score column per animal
+    class ("score_<class>") and, when the bird head is active, one per bird
+    subclass ("birdscore_<class>"). Class labels are in the run language.
+    """
+    header = list(CSV_HEADER)
+    header += ["score_" + sanitize_column(c) for c in animal_classes]
+    header += ["birdscore_" + sanitize_column(c) for c in bird_classes or ()]
+    return header
+
+
+def read_csv_header(path):
+    """Return the header row of a CSV file, or None if unreadable/empty."""
+    try:
+        with open(path, newline="", encoding="utf-8") as handle:
+            return next(csv.reader(handle), None)
+    except OSError:
+        return None
+
+
+def shard_header_union(out_dir, exclude=()):
+    """The union of the shard CSV headers in out_dir, as one ordered list.
+
+    Shards written by different versions of this tool can carry different
+    columns (older runs lack the per-class score columns). The widest header
+    seen supplies the base order; any column it lacks is appended in
+    first-seen order. Falls back to CSV_HEADER when no shard exists yet.
+    """
+    headers = []
+    for path in iter_shard_csvs(out_dir, exclude=exclude):
+        header = read_csv_header(path)
+        if header:
+            headers.append(header)
+    if not headers:
+        return list(CSV_HEADER)
+    columns = list(max(headers, key=len))  # first-seen widest header wins ties
+    seen = set(columns)
+    for header in headers:
+        for col in header:
+            if col not in seen:
+                columns.append(col)
+                seen.add(col)
+    return columns
+
+
+def merge_csvs(out_dir, merge_out, header=None):
     """Stream-concatenate the per-shard CSVs in out_dir into merge_out.
 
-    The header is written once; each source file's own header row is dropped and
-    its data rows are copied through csv.writer so quoting stays correct. Files
-    are streamed, not loaded whole. The write is atomic (temp then rename) and
-    merge_out is excluded from the inputs, so this is an idempotent rebuild that
-    never appends. Returns (n_files, n_rows).
+    The header is written once; each source file's own header row is read and
+    its data rows are re-mapped into the output columns by column NAME, so
+    shards written by different tool versions (for example old shards without
+    the per-class score columns) merge cleanly, with missing cells left blank.
+    When header is None (the default) the union of the shard headers is used.
+    Rows go through csv.writer so quoting stays correct, and files are
+    streamed, not loaded whole. The write is atomic (temp then rename) and
+    merge_out is excluded from the inputs, so this is an idempotent rebuild
+    that never appends. Returns (n_files, n_rows).
     """
     out_dir = os.path.abspath(out_dir)
     merge_out = os.path.abspath(merge_out)
     directory = os.path.dirname(merge_out) or "."
     os.makedirs(directory, exist_ok=True)
     sources = list(iter_shard_csvs(out_dir, exclude=[merge_out]))
+    if header is None:
+        header = shard_header_union(out_dir, exclude=[merge_out])
     fd, tmp = tempfile.mkstemp(
         dir=directory, prefix=os.path.basename(merge_out) + ".", suffix=".tmp"
     )
@@ -277,12 +348,24 @@ def merge_csvs(out_dir, merge_out, header=CSV_HEADER):
                 with open(src, newline="", encoding="utf-8") as handle:
                     reader = csv.reader(handle)
                     try:
-                        next(reader)  # drop this file's header row
+                        src_header = next(reader)
                     except StopIteration:
                         continue  # empty file
                     n_files += 1
+                    if src_header == header:
+                        # Fast path: columns already line up; copy rows through.
+                        for row in reader:
+                            writer.writerow(row)
+                            n_rows += 1
+                        continue
+                    # Re-map by column name; absent columns stay blank.
+                    positions = {col: i for i, col in enumerate(src_header)}
+                    indices = [positions.get(col) for col in header]
                     for row in reader:
-                        writer.writerow(row)
+                        writer.writerow([
+                            row[i] if i is not None and i < len(row) else ""
+                            for i in indices
+                        ])
                         n_rows += 1
             out.flush()
             os.fsync(out.fileno())
@@ -603,29 +686,59 @@ def install_shared_models(predict_tools, classif_tools, detect_tools,
     return classifier, detector
 
 
+def _fmt_score(value):
+    """Format a raw score cell: 4 decimals, or blank for NaN (no animal crop)."""
+    value = float(value)
+    if value != value:  # NaN: the classifier never ran on this image
+        return ""
+    return f"{value:.4f}"
+
+
 def build_rows(predictor):
-    """Read a finished predictor and assemble the per-image CSV rows."""
+    """Read a finished predictor and assemble the per-image CSV rows.
+
+    Row layout matches full_csv_header(): the fixed columns, then one raw
+    softmax score per animal class, then (bird head only) one per bird
+    subclass. The top1_* columns keep the best-scoring label even when the
+    score is below the classification threshold (where prediction_* becomes
+    "undefined"), and above_threshold records whether the sequence prediction
+    passed the threshold — so results can be re-thresholded after the run.
+    """
     seq_class, seq_score, _boxes, count = predictor.getPredictions()
-    img_class, img_score, _boxes2, _count2 = predictor.getPredictionsBase()
+    seq_top1 = predictor.getPredictedTop1()
+    img_class, img_score, img_top1 = predictor.getPredictionsBaseAll()
+    detconf = predictor.getDetectionConfs()
+    animal_scores, bird_scores = predictor.getClassScores()
     dates = predictor.getDates()
     seqnums = predictor.getSeqnums()
     filenames = predictor.getFilenames()
     humancount = predictor.getHumanCount()
     rows = []
     for k in range(len(filenames)):
-        rows.append(
-            [
-                filenames[k],
-                dates[k],
-                int(seqnums[k]),
-                seq_class[k],
-                seq_score[k],
-                img_class[k],
-                img_score[k],
-                int(count[k]),
-                int(humancount[k]),
-            ]
-        )
+        # Below threshold the engine rewrites the class to "undefined" but
+        # keeps top1 as the winning label, so equality means "passed".
+        above = "yes" if seq_class[k] == seq_top1[k] else "no"
+        row = [
+            filenames[k],
+            dates[k],
+            int(seqnums[k]),
+            seq_class[k],
+            seq_top1[k],
+            seq_score[k],
+            above,
+            img_class[k],
+            img_top1[k],
+            img_score[k],
+            int(count[k]),
+            int(humancount[k]),
+            f"{float(detconf[k][0]):.4f}",
+            f"{float(detconf[k][1]):.4f}",
+            f"{float(detconf[k][2]):.4f}",
+        ]
+        row += [_fmt_score(v) for v in animal_scores[k]]
+        if bird_scores is not None:
+            row += [_fmt_score(v) for v in bird_scores[k]]
+        rows.append(row)
     return rows
 
 
@@ -884,6 +997,14 @@ def run(args):
     )
     LOG.info("Models loaded in %.1fs", time.monotonic() - t0)
 
+    # The shard CSV header for this run: the fixed columns plus one raw score
+    # column per animal class (and per bird subclass when the bird head is on),
+    # named in the run language.
+    run_header = full_csv_header(
+        predictTools.txt_animalclasses[args.lang],
+        predictTools.txt_birdclasses[args.lang] if args.birds else (),
+    )
+
     # Record images the engine cannot read to a sidecar so they can be audited,
     # and keep a running count rather than letting a bad file abort the run.
     unreadable_path = os.path.join(out_dir, "unreadable_images.txt")
@@ -996,7 +1117,7 @@ def run(args):
         )
         if rows is None:  # aborted mid-shard by a signal
             break
-        atomic_write_csv(csv_path, CSV_HEADER, rows)
+        atomic_write_csv(csv_path, run_header, rows)
         progress.complete_shard(len(image_paths))
         processed += 1
         LOG.info(

@@ -463,19 +463,98 @@ def current_swap_total_bytes():
     return psutil.swap_memory().total
 
 
-def create_swapfile(size_gib, path="/swapfile", runner=None):
-    """Create and enable a swapfile via sudo. Returns True on success.
+def swapfile_status(path="/swapfile"):
+    """Return (exists, size_bytes, active) for a swapfile path.
 
-    Each step needs root; the user is prompted for sudo by the system. Any
-    failure returns False so the caller can continue without swap.
+    Active means listed in /proc/swaps. A swapfile created on a previous boot
+    but never added to /etc/fstab shows up here as exists-but-inactive: full
+    size on disk, doing nothing.
+    """
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return False, 0, False
+    active = False
+    try:
+        with open("/proc/swaps", encoding="utf-8") as handle:
+            active = any(
+                line.split()[:1] == [path] for line in list(handle)[1:]
+            )
+    except OSError:
+        pass
+    return True, size, active
+
+
+def free_disk_bytes(path="/"):
+    """Free bytes available to non-root users on path's filesystem."""
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize
+
+
+def fstab_has_swapfile(path="/swapfile"):
+    """True if /etc/fstab already lists the swapfile (so it survives reboots)."""
+    try:
+        with open("/etc/fstab", encoding="utf-8") as handle:
+            return any(
+                line.split()[:1] == [path]
+                for line in handle
+                if not line.lstrip().startswith("#")
+            )
+    except OSError:
+        return False
+
+
+# Never let swapfile creation leave the disk with less free space than this:
+# a full root filesystem stops the classifier (and everything else) dead.
+MIN_FREE_AFTER_SWAP_GIB = 5
+
+
+def create_swapfile(size_gib, path="/swapfile", runner=None,
+                    status=None, free_bytes=None):
+    """Create (or re-enable) a swapfile via sudo and persist it in /etc/fstab.
+
+    An existing file at path is reused: after a reboot an unpersisted swapfile
+    is inactive but still full-size on disk, so re-enabling it costs nothing
+    while recreating it blindly wastes gigabytes. Creation is refused when the
+    disk would be left with less than MIN_FREE_AFTER_SWAP_GIB free. The fstab
+    entry is appended (once) so the swapfile keeps working after reboots
+    instead of becoming dead weight. Returns True when the swapfile ends up
+    active; any failure returns False so the caller continues without swap.
     """
     runner = runner or (lambda cmd: subprocess.run(cmd).returncode == 0)
-    steps = [
-        ["sudo", "fallocate", "-l", f"{size_gib}G", path],
-        ["sudo", "chmod", "600", path],
-        ["sudo", "mkswap", path],
-        ["sudo", "swapon", path],
-    ]
+    exists, size, active = (status or swapfile_status)(path)
+    wanted = size_gib * 1024 ** 3
+    steps = []
+    if active and size >= wanted:
+        print(f"Swapfile {path} is already active ({gib(size):.0f} GiB).")
+    else:
+        if active:  # active but too small: rebuild it at the new size
+            steps.append(["sudo", "swapoff", path])
+        grow = wanted - (size if exists else 0)
+        if grow > 0:
+            free = (free_bytes or free_disk_bytes)(os.path.dirname(path) or "/")
+            if free < grow + MIN_FREE_AFTER_SWAP_GIB * 1024 ** 3:
+                print(
+                    f"Not enough disk for a {size_gib} GiB swapfile: only "
+                    f"{gib(free):.1f} GiB free and at least "
+                    f"{MIN_FREE_AFTER_SWAP_GIB} GiB must stay free. Skipping "
+                    "swap creation; free some space and try again."
+                )
+                return False
+        if exists and size >= wanted:
+            print(f"Reusing the existing {gib(size):.0f} GiB swapfile at {path}.")
+        else:
+            steps.append(["sudo", "fallocate", "-l", f"{size_gib}G", path])
+        steps += [
+            ["sudo", "chmod", "600", path],
+            ["sudo", "mkswap", path],
+            ["sudo", "swapon", path],
+        ]
+    if not fstab_has_swapfile(path):
+        steps.append([
+            "sudo", "sh", "-c",
+            f"echo '{path} none swap sw 0 0' >> /etc/fstab",
+        ])
     for cmd in steps:
         try:
             if not runner(cmd):
@@ -1164,7 +1243,7 @@ def stage_swap(args):
             return
         print(f"Creating a {args.swap_gib} GiB swapfile (requires sudo)...")
         if create_swapfile(args.swap_gib):
-            print("Swapfile created and enabled. Add it to /etc/fstab to persist.")
+            print("Swapfile active and persisted in /etc/fstab.")
         else:
             print("Swapfile creation did not complete; continuing without it.")
         return
@@ -1188,7 +1267,7 @@ def stage_swap(args):
         return
     print(f"Creating a {size} GiB swapfile (requires sudo)...")
     if create_swapfile(size):
-        print("Swapfile created and enabled. To persist across reboots, add it to /etc/fstab.")
+        print("Swapfile active and persisted in /etc/fstab.")
     else:
         print("Swapfile creation did not complete; continuing without it.")
 

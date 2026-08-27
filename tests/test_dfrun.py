@@ -67,14 +67,65 @@ def test_needs_swap():
     assert not dfrun.needs_swap(32 * 1024 ** 3)
 
 
-def test_create_swapfile_runs_steps_and_handles_failure():
+GIB = 1024 ** 3
+_MISSING = lambda path: (False, 0, False)  # noqa: E731  (no swapfile on disk)
+_PLENTY = lambda path: 100 * GIB  # noqa: E731  (lots of free disk)
+
+
+def test_create_swapfile_runs_steps_and_handles_failure(monkeypatch):
+    monkeypatch.setattr(dfrun, "fstab_has_swapfile", lambda path: False)
     calls = []
-    ok = dfrun.create_swapfile(8, path="/swapfile", runner=lambda cmd: calls.append(cmd) or True)
+    ok = dfrun.create_swapfile(
+        8, path="/swapfile", runner=lambda cmd: calls.append(cmd) or True,
+        status=_MISSING, free_bytes=_PLENTY,
+    )
     assert ok
+    assert any("fallocate" in cmd for cmd in calls)
     assert any("mkswap" in cmd for cmd in calls)
     assert any("swapon" in cmd for cmd in calls)
+    # Persisted so a reboot does not orphan the file as dead disk weight.
+    assert any("/etc/fstab" in " ".join(cmd) for cmd in calls)
     # A failing step aborts and returns False.
-    assert not dfrun.create_swapfile(8, runner=lambda cmd: False)
+    assert not dfrun.create_swapfile(
+        8, runner=lambda cmd: False, status=_MISSING, free_bytes=_PLENTY
+    )
+
+
+def test_create_swapfile_refuses_when_disk_would_fill(monkeypatch):
+    monkeypatch.setattr(dfrun, "fstab_has_swapfile", lambda path: False)
+    calls = []
+    # 12 GiB wanted, 13 GiB free: would leave under the 5 GiB safety margin.
+    ok = dfrun.create_swapfile(
+        12, runner=lambda cmd: calls.append(cmd) or True,
+        status=_MISSING, free_bytes=lambda path: 13 * GIB,
+    )
+    assert not ok
+    assert calls == []  # refused before touching the system
+
+
+def test_create_swapfile_reuses_inactive_file(monkeypatch):
+    monkeypatch.setattr(dfrun, "fstab_has_swapfile", lambda path: False)
+    calls = []
+    # A 16 GiB file from a previous boot, currently inactive; want 12 GiB.
+    ok = dfrun.create_swapfile(
+        12, runner=lambda cmd: calls.append(cmd) or True,
+        status=lambda path: (True, 16 * GIB, False),
+        free_bytes=lambda path: 1 * GIB,  # nearly full disk: reuse needs none
+    )
+    assert ok
+    assert not any("fallocate" in cmd for cmd in calls)  # no new allocation
+    assert any("swapon" in cmd for cmd in calls)
+
+
+def test_create_swapfile_already_active_only_persists(monkeypatch):
+    monkeypatch.setattr(dfrun, "fstab_has_swapfile", lambda path: True)
+    calls = []
+    ok = dfrun.create_swapfile(
+        8, runner=lambda cmd: calls.append(cmd) or True,
+        status=lambda path: (True, 16 * GIB, True), free_bytes=_PLENTY,
+    )
+    assert ok
+    assert calls == []  # active, big enough and persisted: nothing to do
 
 
 # ---------------------------------------------------------------------------

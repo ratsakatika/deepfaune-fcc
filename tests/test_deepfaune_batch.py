@@ -523,6 +523,44 @@ def test_full_csv_header_sanitises_class_names():
 
 
 # ---------------------------------------------------------------------------
+# impossible-species exclusion (--exclude-classes)
+# ---------------------------------------------------------------------------
+def test_parse_excluded_classes():
+    # Case-insensitive, whitespace-tolerant, dupes dropped, engine order kept.
+    names, err = dfb.parse_excluded_classes(" Marmot , ibex,  WILD  BOAR ,ibex")
+    assert err is None
+    assert names == ["ibex", "marmot", "wild boar"]  # engine index order
+    assert dfb.parse_excluded_classes("") == ([], None)
+    assert dfb.parse_excluded_classes("  ,  ") == ([], None)
+    names, err = dfb.parse_excluded_classes("ibex,dragon,unicorn")
+    assert names is None
+    assert "dragon" in err and "unicorn" in err and "choose from" in err
+
+
+def test_validate_common_rejects_unknown_excluded_class():
+    args = _args(exclude_classes="wolf,dragon")
+    err = dfb.validate_common(args)
+    assert err is not None and "--exclude-classes" in err and "dragon" in err
+    assert dfb.validate_common(_args(exclude_classes="wolf, lynx")) is None
+
+
+def test_run_metadata_records_excluded_classes(tmp_path):
+    sw = tmp_path / "sw"
+    sw.mkdir()
+    out = tmp_path / "out"
+    out.mkdir()
+    args = _args(exclude_classes="marmot,ibex", partition=0)
+    _path, meta = dfb.write_run_metadata(str(out), str(sw), "/root", args)
+    assert meta["excluded_classes"] == ["ibex", "marmot"]
+
+
+def test_animal_classes_en_matches_engine():
+    """The stdlib copy must track classifTools exactly (skips without torch)."""
+    classifTools = pytest.importorskip("classifTools")
+    assert dfb.ANIMAL_CLASSES_EN == list(classifTools.txt_animalclasses["en"])
+
+
+# ---------------------------------------------------------------------------
 # per-image CSV rows (build_rows against a stub predictor; no torch needed)
 # ---------------------------------------------------------------------------
 class _StubPredictor:

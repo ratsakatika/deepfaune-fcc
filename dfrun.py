@@ -560,6 +560,8 @@ def build_worker_command(software_dir, source, out_dir, params):
     ]
     if params.get("birds", True):
         cmd.append("--birds")
+    if params.get("exclude_classes"):
+        cmd += ["--exclude-classes", ",".join(params["exclude_classes"])]
     return cmd
 
 
@@ -972,6 +974,82 @@ def parse_pos_int(reply):
     return (value, True) if value >= 1 else (None, False)
 
 
+def parse_exclusion_numbers(reply, n):
+    """Parse '3, 7,12' into unique sorted 1-based menu numbers within [1, n].
+
+    Returns (numbers, error). Blank input means none. Empty segments from
+    stray commas are ignored; anything non-numeric or out of range is an
+    error naming the offending entry.
+    """
+    numbers = []
+    for part in reply.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = int(part)
+        except ValueError:
+            return None, f"'{part}' is not a number"
+        if not 1 <= value <= n:
+            return None, f"{value} is out of range (1 to {n})"
+        if value not in numbers:
+            numbers.append(value)
+    return sorted(numbers), None
+
+
+def print_class_menu(classes, per_row=3):
+    """Print a numbered menu of class names, several per line."""
+    width = max(len(c) for c in classes) + 2
+    for start in range(0, len(classes), per_row):
+        cells = [
+            f"{idx + 1:3d} {classes[idx]:<{width}}"
+            for idx in range(start, min(start + per_row, len(classes)))
+        ]
+        print("  " + "".join(cells).rstrip())
+
+
+def prompt_excluded_classes(current, prompt_fn=_default_prompt):
+    """Ask whether to keep all animal classes; if not, pick numbers to exclude.
+
+    current is the list of English class names already excluded (from the
+    command line); Enter keeps it. Returns the (possibly updated) list, in
+    engine order. The number entry is re-asked until it parses cleanly.
+    """
+    menu = sorted(dfb.ANIMAL_CLASSES_EN)
+    print(
+        "Impossible species: species that cannot occur in the survey area can "
+        "be excluded, so the\nclassifier never names them. The raw score "
+        "columns are still recorded for every class."
+    )
+    if current:
+        print("  Currently excluding: " + ", ".join(current))
+    shown = "no" if current else "yes"
+    reply = prompt_fn(
+        f"  Include all {len(menu)} animal classes? (yes/no) [{shown}]: "
+    ).strip().lower()
+    if not reply:
+        return list(current)  # Enter keeps the current choice, like the rest
+    if reply in ("y", "yes"):
+        return []
+    if reply not in ("n", "no"):
+        print(f"  Not valid; keeping {shown}.")
+        return list(current)
+    print_class_menu(menu)
+    while True:
+        reply = prompt_fn(
+            "  Numbers of the classes to EXCLUDE, separated by commas "
+            "(e.g. 5,12,31), or Enter for none: "
+        ).strip()
+        numbers, err = parse_exclusion_numbers(reply, len(menu))
+        if err:
+            print(f"  Not valid: {err}. Try again.")
+            continue
+        excluded = [menu[i - 1] for i in numbers]
+        excluded.sort(key=dfb.ANIMAL_CLASSES_EN.index)  # engine order
+        print("  Excluding: " + (", ".join(excluded) if excluded else "none"))
+        return excluded
+
+
 def prompt_setting(explain, label, current, parser, shown=None):
     """Print a one-line explanation, then prompt. Return the new value or current.
 
@@ -993,6 +1071,8 @@ def prompt_setting(explain, label, current, parser, shown=None):
 def _print_params(params):
     for key in ("detector", "birds", "threshold", "maxlag", "batch_size", "threads", "merge_every"):
         print(f"  {key:12s} {params[key]}")
+    excluded = params.get("exclude_classes") or []
+    print(f"  {'exclude':12s} {', '.join(excluded) if excluded else 'none'}")
 
 
 def stage_configure(args, out_dir):
@@ -1005,6 +1085,8 @@ def stage_configure(args, out_dir):
         "batch_size": args.batch_size,
         "threads": args.threads,
         "merge_every": args.merge_every,
+        # Validated in main(); a parse failure never reaches this point.
+        "exclude_classes": dfb.parse_excluded_classes(args.exclude_classes)[0] or [],
     }
     # Warn if a previous run used different threshold/maxlag (mixed dataset).
     previous = read_status(out_dir) or load_json(
@@ -1018,6 +1100,13 @@ def stage_configure(args, out_dir):
                 f"NOTE: a previous run used threshold {prev_t} / maxlag {prev_l}; "
                 f"this run uses {params['threshold']} / {params['maxlag']}. "
                 "Completed shards keep their old values (mixed dataset)."
+            )
+        prev_x = previous.get("excluded_classes")
+        if prev_x is not None and sorted(prev_x) != sorted(params["exclude_classes"]):
+            print(
+                f"NOTE: a previous run excluded [{', '.join(prev_x) or 'none'}]; "
+                f"this run excludes [{', '.join(params['exclude_classes']) or 'none'}]. "
+                "Completed shards keep their old exclusions (mixed dataset)."
             )
     print("Run parameters:")
     _print_params(params)
@@ -1034,6 +1123,7 @@ def stage_configure(args, out_dir):
         "so on) instead of just 'bird'.",
         "Bird sub-groups (on/off)", params["birds"], parse_onoff,
         shown=("on" if params["birds"] else "off"))
+    params["exclude_classes"] = prompt_excluded_classes(params["exclude_classes"])
     params["threshold"] = prompt_setting(
         "Confidence threshold: how sure the model must be to name a species. "
         "Higher means fewer wrong names but more animals left 'undefined'; lower "
@@ -1296,6 +1386,11 @@ def build_arg_parser():
     birds = parser.add_mutually_exclusive_group()
     birds.add_argument("--birds", dest="birds", action="store_true", default=DEFAULTS["birds"])
     birds.add_argument("--no-birds", dest="birds", action="store_false")
+    parser.add_argument(
+        "--exclude-classes", default="",
+        help="Comma-separated English animal class names the classifier must "
+             "never predict (impossible species), e.g. 'ibex,marmot,genet'. "
+             "Interactive runs can also pick these from a numbered menu.")
     parser.add_argument("--rescan", action="store_true", help="Force a fresh total count, ignoring the cache.")
     parser.add_argument("--yes", action="store_true", help="Accept defaults without prompting (non-interactive).")
     parser.add_argument("--attach", action="store_true", help="Attach to the live readout of a running worker and exit.")
@@ -1313,6 +1408,13 @@ def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     out_dir = os.path.abspath(args.out_dir)
     software_dir = os.path.abspath(args.software_dir)
+
+    # Fail early on a bad --exclude-classes so the error names the problem
+    # before any stage runs (interactive runs can still adjust it later).
+    _, exclude_err = dfb.parse_excluded_classes(args.exclude_classes)
+    if exclude_err:
+        print(f"error: --exclude-classes: {exclude_err}", file=sys.stderr)
+        return 2
 
     # Persist the update-check preference if the user set it explicitly.
     if args.update_check is not None:

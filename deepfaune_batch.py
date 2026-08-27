@@ -58,6 +58,19 @@ DETECTOR_CHOICES = ["DF", "MDS", "DFbsMDS", "DFMDS", "MDR"]
 # English labels to Romanian downstream if FCC needs it).
 LANG_CHOICES = ["fr", "en", "it", "de", "es"]
 
+# English animal class labels in engine (index) order: a stdlib-only copy of
+# classifTools.txt_animalclasses['en'], so dfrun and argument validation can
+# list and check class names without importing torch. run() verifies this
+# against the real engine list at startup and refuses to run on any drift.
+ANIMAL_CLASSES_EN = [
+    "bison", "badger", "ibex", "beaver", "red deer", "golden jackal",
+    "chamois", "cat", "goat", "roe deer", "dog", "raccoon dog", "fallow deer",
+    "squirrel", "moose", "equid", "genet", "wolverine", "hedgehog",
+    "lagomorph", "wolf", "otter", "lynx", "marmot", "micromammal", "mouflon",
+    "sheep", "mustelid", "bird", "bear", "porcupine", "nutria", "muskrat",
+    "raccoon", "fox", "reindeer", "wild boar", "cow",
+]
+
 # Fixed (non-per-class) columns of a shard CSV, in order. The engine turns a
 # below-threshold prediction into "undefined" but keeps the score, so the
 # top1_* columns preserve the label that scored best and "above_threshold"
@@ -183,6 +196,37 @@ def shard_csv_name(root, leaf_dir):
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", rel.replace(os.sep, "__"))
     digest = hashlib.sha1(rel.encode("utf-8")).hexdigest()[:8]
     return f"{safe}__{digest}.csv"
+
+
+def parse_excluded_classes(text):
+    """Parse a comma-separated list of English animal class names to exclude.
+
+    Returns (names, error): names are canonical labels from ANIMAL_CLASSES_EN
+    (matched case-insensitively, whitespace normalised, duplicates dropped,
+    engine order preserved); error is None on success, else a message naming
+    the entries that are not animal classes. Blank text means no exclusions.
+    """
+    if not text or not text.strip():
+        return [], None
+    lookup = {c.lower(): c for c in ANIMAL_CLASSES_EN}
+    names = []
+    unknown = []
+    for part in text.split(","):
+        key = " ".join(part.split()).lower()
+        if not key:
+            continue
+        canonical = lookup.get(key)
+        if canonical is None:
+            unknown.append(part.strip() or "(blank)")
+        elif canonical not in names:
+            names.append(canonical)
+    if unknown:
+        return None, (
+            "unknown animal classes: " + ", ".join(unknown)
+            + " (choose from: " + ", ".join(sorted(ANIMAL_CLASSES_EN)) + ")"
+        )
+    names.sort(key=ANIMAL_CLASSES_EN.index)
+    return names, None
 
 
 def plan_shards(shards, out_dir, root, rescan):
@@ -563,6 +607,9 @@ def build_run_metadata(out_dir, software_dir, root, args):
         "threshold": args.threshold,
         "maxlag": args.maxlag,
         "birds": args.birds,
+        "excluded_classes": parse_excluded_classes(
+            getattr(args, "exclude_classes", "")
+        )[0] or [],
         "lang": args.lang,
         "batch_size": args.batch_size,
         "deepfaune_version": read_deepfaune_version(software_dir),
@@ -744,13 +791,16 @@ def build_rows(predictor):
 
 def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
                   batch_size, detector_name, stopper, heartbeat_secs, progress,
-                  shard_label, report=None):
+                  shard_label, report=None, excluded_lang=()):
     """Run the engine over one shard.
 
     Returns the list of CSV rows, or None if a stop was requested mid-shard (in
     which case nothing is written and the shard is redone on resume). The rate
     tracker is fed every batch so throughput and ETA update continuously, and
     the optional report callback refreshes the status file on each heartbeat.
+    excluded_lang are animal class labels IN THE RUN LANGUAGE the classifier
+    must never predict (the engine drops them from the candidate set; their
+    raw score columns are still recorded).
     """
     predictor = predict_tools.PredictorImage(
         image_paths,
@@ -762,6 +812,8 @@ def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
         detectorname=detector_name,
         device=DEVICE,
     )
+    if excluded_lang:
+        predictor.setForbiddenAnimalClasses(list(excluded_lang))
     total = len(image_paths)
     predictor.resetBatch()
     last_hb = time.monotonic()
@@ -833,6 +885,9 @@ def validate_common(args):
         return f"--threshold must satisfy 0 < t <= 1 (got {args.threshold})"
     if args.heartbeat_secs < 0:
         return f"--heartbeat-secs must be >= 0 (got {args.heartbeat_secs})"
+    _, err = parse_excluded_classes(getattr(args, "exclude_classes", ""))
+    if err:
+        return f"--exclude-classes: {err}"
     if args.merge_every < 0:
         return f"--merge-every must be >= 0 (got {args.merge_every})"
     if args.max_images is not None and args.max_images < 1:
@@ -997,6 +1052,26 @@ def run(args):
     )
     LOG.info("Models loaded in %.1fs", time.monotonic() - t0)
 
+    # The stdlib copy of the class list must match the engine exactly, or the
+    # exclusion numbers/names shown by dfrun would silently mean the wrong
+    # species. Refuse to run on any drift.
+    if list(predictTools.txt_animalclasses["en"]) != ANIMAL_CLASSES_EN:
+        LOG.error(
+            "ANIMAL_CLASSES_EN is out of date with classifTools "
+            "txt_animalclasses['en']; update deepfaune_batch.py"
+        )
+        return 2
+
+    # Excluded (impossible) species: validated names in English, converted to
+    # the run language for the engine's forbidden-class filter.
+    excluded_en, _err = parse_excluded_classes(args.exclude_classes)
+    excluded_lang = [
+        predictTools.txt_animalclasses[args.lang][ANIMAL_CLASSES_EN.index(name)]
+        for name in excluded_en
+    ]
+    if excluded_en:
+        LOG.info("excluded classes: %s", ", ".join(excluded_en))
+
     # The shard CSV header for this run: the fixed columns plus one raw score
     # column per animal class (and per bird subclass when the bird head is on),
     # named in the run language.
@@ -1114,6 +1189,7 @@ def run(args):
             detector_name=args.detector, stopper=stopper,
             heartbeat_secs=args.heartbeat_secs, progress=progress,
             shard_label=shard_label, report=report,
+            excluded_lang=excluded_lang,
         )
         if rows is None:  # aborted mid-shard by a signal
             break
@@ -1199,6 +1275,13 @@ def build_arg_parser():
     parser.add_argument(
         "--birds", action="store_true",
         help="Enable the 8-way bird sub-classifier head.",
+    )
+    parser.add_argument(
+        "--exclude-classes", default="",
+        help="Comma-separated English animal class names the classifier must "
+             "never predict (impossible species for the survey area), e.g. "
+             "'ibex,marmot,genet'. Raw per-class scores are still recorded "
+             "for excluded classes; only the prediction is constrained.",
     )
     parser.add_argument(
         "--batch-size", type=int, default=8,

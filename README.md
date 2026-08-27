@@ -63,6 +63,7 @@ To resume after any stop, just run `dfrun` again; finished shards are skipped.
 | --- | --- | --- |
 | detector | DF | DF, MDS, DFbsMDS, DFMDS or MDR. DF is the lightest; avoid MDR on CPU. |
 | birds | on | The 8-way bird sub-classifier head. |
+| exclude | none | Impossible species the classifier must never predict. |
 | threshold | 0.5 | Matches the demo script and the first long run (the GUI uses 0.8). |
 | maxlag | 20 s | Matches the demo script and the first long run (the GUI uses 10). |
 | batch-size | 8 | Must be at least 1. |
@@ -94,6 +95,15 @@ What each setting does:
   not on CPU.
 - **birds** - when on, crops classed as "bird" are split into eight groups
   (corvid, raptor, passerine and so on); when off they stay as "bird".
+- **exclude** - impossible species: animal classes that cannot occur in the
+  survey area (say, ibex or marmot in lowland forest) can be excluded so the
+  classifier never names them, which stops their lookalikes being mislabelled.
+  In the interactive run, answer "no" to "Include all animal classes?" and
+  pick numbers from the menu shown; on the command line, pass
+  `--exclude-classes "ibex,marmot,genet"` (English names, comma-separated) to
+  `dfrun` or `deepfaune_batch.py`. Exclusion only constrains the prediction
+  columns; the raw `score_*` columns are still recorded for every class, so
+  an exclusion can be reconsidered later from the same results.
 - **threshold** - the classification confidence cut-off. A prediction scoring
   below it is recorded as "undefined". Higher (for example 0.8) means fewer false
   positives (fewer wrong species labels) but more false negatives (more real

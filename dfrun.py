@@ -36,7 +36,10 @@ import deepfaune_batch as dfb  # noqa: E402  (local, stdlib-only at import)
 ### CONSTANTS (edit these in one place)
 ####################################################################################
 TOOL_NAME = "dfrun"
-TOOL_VERSION = "1.0.0"
+# Bump on every change merged to main: patch for fixes, minor for features.
+# See CLAUDE.md ("Versioning") - the self-updater shows this to users, so a
+# stale number makes different code report the same version.
+TOOL_VERSION = "1.2.0"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -949,6 +952,124 @@ def read_status(out_dir, partition=0):
 
 
 ####################################################################################
+### DIAGNOSTICS (--diagnose): read the flight recorder and explain the state
+####################################################################################
+def boot_time_unix():
+    """When this machine booted, in unix seconds; None if unknowable."""
+    try:
+        with open("/proc/uptime", encoding="utf-8") as handle:
+            return time.time() - float(handle.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def read_telemetry_tail(out_dir, n=8, partition=0):
+    """The newest n flight-recorder samples, as dicts (oldest first)."""
+    path = os.path.join(out_dir, f"telemetry.p{partition}.csv")
+    try:
+        with open(path, newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+    except OSError:
+        return []
+    return rows[-n:]
+
+
+def diagnose_verdict(worker_alive, status, last_sample, boot_unix):
+    """One-sentence explanation of the run's state or its last death. Pure.
+
+    status is the parsed status dict (or None); last_sample the newest
+    telemetry row as strings (or None); boot_unix the machine's boot time.
+    """
+    if worker_alive:
+        return "healthy: a worker is running now"
+    state = (status or {}).get("state")
+    reason = (status or {}).get("reason")
+    if state == "finished":
+        return "finished: the last run completed normally"
+    if state == "stopped":
+        if reason:
+            return f"stopped itself deliberately - {reason}"
+        return "stopped cleanly (operator signal or watchdog)"
+    if state != "running":
+        return "no run recorded in this output directory yet"
+    # Status says "running" but no process exists: it died without a goodbye.
+    if last_sample:
+        def num(key):
+            try:
+                return float(last_sample.get(key) or "nan")
+            except (TypeError, ValueError):
+                return float("nan")
+        if last_sample.get("root_ok") == "0":
+            return ("crashed: the archive drive had disconnected "
+                    "(root_ok=0 in the last telemetry sample)")
+        if num("disk_free_gib") < 1.0:
+            return (f"crashed: the output disk was nearly full "
+                    f"({num('disk_free_gib'):.1f} GiB free at the last sample)")
+        if num("mem_available_gib") < 1.0:
+            return (f"crashed: memory exhaustion - only "
+                    f"{num('mem_available_gib'):.1f} GiB available at the last "
+                    "sample (OOM kill likely)")
+        try:
+            sample_unix = datetime.fromisoformat(last_sample["time"]).timestamp()
+            if boot_unix is not None and boot_unix > sample_unix:
+                return ("killed by a reboot or power loss: the machine booted "
+                        "after the last healthy sample")
+        except (KeyError, ValueError):
+            pass
+        return ("crashed while system readings looked healthy - likely a "
+                "software fault; check dfrun.console.log for a traceback")
+    return ("crashed with no telemetry recorded (run predates the flight "
+            "recorder?) - check dfrun.console.log and the journal")
+
+
+def run_diagnose(out_dir):
+    """Print a text diagnosis: settings, status, flight recorder, verdict."""
+    print(f"Diagnostics for {out_dir}")
+    meta = load_json(os.path.join(out_dir, "run_metadata.p0.json")) or {}
+    if meta:
+        excluded = ", ".join(meta.get("excluded_classes") or []) or "none"
+        print(
+            f"Run settings: detector={meta.get('detector')} "
+            f"threshold={meta.get('threshold')} maxlag={meta.get('maxlag')} "
+            f"birds={meta.get('birds')} lang={meta.get('lang')} "
+            f"excluded=[{excluded}]"
+        )
+        commit = str(meta.get("orchestrator_git_commit") or "")[:10]
+        print(f"Launched: {meta.get('utc_start_time')} | code version {commit}")
+    alive = worker_running(out_dir)
+    status = read_status(out_dir)
+    if status:
+        age = int(time.time() - (status.get("updated_unix") or 0))
+        line = (
+            f"Status: {status.get('state')} | "
+            f"{status.get('true_done', 0):,} done ({status.get('true_pct')}%) | "
+            f"last update {age}s ago"
+        )
+        if status.get("reason"):
+            line += f" | reason: {status['reason']}"
+        print(line)
+    tail = read_telemetry_tail(out_dir)
+    if tail:
+        print("Flight recorder (newest last):")
+        header = ["time", "state", "avail", "shmem", "swap", "rss", "disk", "load", "root"]
+        keys = ["time", "state", "mem_available_gib", "shmem_gib",
+                "swap_used_gib", "worker_rss_gib", "disk_free_gib", "load1", "root_ok"]
+        print("  " + "  ".join(f"{h:>6}" if h != "time" else f"{h:20}" for h in header))
+        for row in tail:
+            cells = []
+            for head, key in zip(header, keys):
+                value = str(row.get(key, ""))
+                cells.append(f"{value:20.20}" if head == "time" else f"{value:>6.6}")
+            print("  " + "  ".join(cells))
+    else:
+        print("Flight recorder: no telemetry file yet (run predates it, or no run).")
+    print("Verdict:", diagnose_verdict(alive, status, tail[-1] if tail else None,
+                                       boot_time_unix()))
+    print(f"Deeper: tail -30 {os.path.join(out_dir, CONSOLE_LOG_NAME)}")
+    return 0
+
+
+####################################################################################
 ### STAGES
 ####################################################################################
 def stage_banner():
@@ -1477,6 +1598,7 @@ def build_arg_parser():
     parser.add_argument("--yes", action="store_true", help="Accept defaults without prompting (non-interactive).")
     parser.add_argument("--attach", action="store_true", help="Attach to the live readout of a running worker and exit.")
     parser.add_argument("--dashboard", action="store_true", help="Build and open the dashboard from the current results, then exit.")
+    parser.add_argument("--diagnose", action="store_true", help="Print run settings, the flight recorder tail, and a crash/health verdict, then exit.")
     parser.add_argument("--no-update", action="store_true", help="Skip the self-update check this launch.")
     parser.add_argument("--update-check", choices=("auto", "never"), default=None,
                         help="Persist the update-check preference (auto or never; default: auto).")
@@ -1503,6 +1625,10 @@ def main(argv=None):
         config = load_config()
         config["update_check"] = args.update_check
         save_config(config)
+
+    # Diagnose mode: read-only, no update check, no drive needed.
+    if args.diagnose:
+        return run_diagnose(out_dir)
 
     stage_banner()
 

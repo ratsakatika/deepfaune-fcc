@@ -703,3 +703,68 @@ def test_metadata_one_file_per_partition(tmp_path):
     assert os.path.basename(p0) == "run_metadata.p0.json"
     assert os.path.basename(p1) == "run_metadata.p1.json"
     assert p0 != p1
+
+
+# ---------------------------------------------------------------------------
+# self-protection guards and the telemetry flight recorder
+# ---------------------------------------------------------------------------
+def test_parse_meminfo():
+    text = "MemTotal:  16000000 kB\nMemAvailable:  1048576 kB\nShmem: 2048 kB\nbadline\n"
+    info = dfb.parse_meminfo(text)
+    assert info["MemAvailable"] == 1048576 * 1024
+    assert info["Shmem"] == 2048 * 1024
+
+
+def test_memory_pressure():
+    low, avail = dfb.memory_pressure({"MemAvailable": 1 * dfb.GIB}, 1.5)
+    assert low and abs(avail - 1.0) < 1e-6
+    low, _ = dfb.memory_pressure({"MemAvailable": 4 * dfb.GIB}, 1.5)
+    assert not low
+    # Unknown meminfo must never trigger a protective stop.
+    assert dfb.memory_pressure({}, 1.5) == (False, None)
+
+
+def test_shard_reads_failing():
+    # Mass failure: many failures AND most of the shard failing.
+    assert dfb.shard_reads_failing(60, 80)
+    # A sprinkling of corrupt files in a big shard: keep going.
+    assert not dfb.shard_reads_failing(30, 5000)
+    # A few failures at the very start: below the absolute floor.
+    assert not dfb.shard_reads_failing(8, 10)
+    assert not dfb.shard_reads_failing(0, 0)
+
+
+def test_telemetry_sample_and_append(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    sample = dfb.telemetry_sample("running", 123, 4.567, str(out), str(root))
+    assert sample["state"] == "running"
+    assert sample["done"] == 123
+    assert sample["rate_img_s"] == 4.57
+    assert sample["root_ok"] == 1
+    assert set(sample) == set(dfb.TELEMETRY_FIELDS)
+    # A vanished root is recorded as 0 - the drive-disconnect fingerprint.
+    gone = dfb.telemetry_sample("running", 1, 0.0, str(out), str(root / "nope"))
+    assert gone["root_ok"] == 0
+
+    dfb.append_telemetry(str(out), 0, sample)
+    dfb.append_telemetry(str(out), 0, gone)
+    with open(out / "telemetry.p0.csv", newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    assert len(rows) == 2  # header written once
+    assert rows[1]["root_ok"] == "0"
+
+
+def test_append_telemetry_rotates(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    monkeypatch.setattr(dfb, "TELEMETRY_MAX_BYTES", 100)
+    sample = {k: "x" for k in dfb.TELEMETRY_FIELDS}
+    for _ in range(6):
+        dfb.append_telemetry(str(out), 0, sample)
+    assert (out / "telemetry.p0.csv.old").exists()
+    # The fresh generation starts with a header again.
+    first = (out / "telemetry.p0.csv").read_text(encoding="utf-8").splitlines()[0]
+    assert first.startswith("time,")

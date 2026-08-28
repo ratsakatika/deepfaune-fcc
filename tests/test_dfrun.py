@@ -496,3 +496,46 @@ def test_maybe_rebuild_dashboard_guards(tmp_path, monkeypatch):
     # Low memory: no build.
     monkeypatch.setattr(dfrun, "enough_memory_for_dashboard", lambda: False)
     assert dfrun._maybe_rebuild_dashboard("/sw", str(tmp_path), 200.0, 100.0, None) is None
+
+
+# ---------------------------------------------------------------------------
+# --diagnose verdicts (pure logic over status + flight recorder)
+# ---------------------------------------------------------------------------
+def _sample(**overrides):
+    base = {
+        "time": "2026-08-28T10:00:00+00:00", "state": "running", "done": "1000",
+        "rate_img_s": "5.0", "mem_available_gib": "8.5", "shmem_gib": "1.0",
+        "swap_used_gib": "0.1", "worker_rss_gib": "3.2", "disk_free_gib": "9.0",
+        "load1": "3.1", "root_ok": "1",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_diagnose_verdict_scenarios():
+    running = {"state": "running"}
+    late = 1e12  # a boot long after any sample
+    assert dfrun.diagnose_verdict(True, running, _sample(), None).startswith("healthy")
+    assert dfrun.diagnose_verdict(False, {"state": "finished"}, None, None).startswith("finished")
+    verdict = dfrun.diagnose_verdict(False, {"state": "stopped", "reason": "low-memory: x"}, None, None)
+    assert "low-memory" in verdict
+    # Dead-while-"running" cases, distinguished by the last sample:
+    assert "drive" in dfrun.diagnose_verdict(False, running, _sample(root_ok="0"), None)
+    assert "disk" in dfrun.diagnose_verdict(False, running, _sample(disk_free_gib="0.3"), None)
+    assert "memory" in dfrun.diagnose_verdict(False, running, _sample(mem_available_gib="0.4"), None)
+    assert "reboot or power loss" in dfrun.diagnose_verdict(False, running, _sample(), late)
+    # Healthy sample, no reboot: software fault.
+    assert "software" in dfrun.diagnose_verdict(False, running, _sample(), 0)
+    # No telemetry at all.
+    assert "no telemetry" in dfrun.diagnose_verdict(False, running, None, None)
+
+
+def test_read_telemetry_tail(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    assert dfrun.read_telemetry_tail(str(out)) == []
+    for i in range(12):
+        dfrun.dfb.append_telemetry(str(out), 0, _sample(done=str(i)))
+    tail = dfrun.read_telemetry_tail(str(out), n=5)
+    assert len(tail) == 5
+    assert tail[-1]["done"] == "11"

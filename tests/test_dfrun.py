@@ -539,3 +539,55 @@ def test_read_telemetry_tail(tmp_path):
     tail = dfrun.read_telemetry_tail(str(out), n=5)
     assert len(tail) == 5
     assert tail[-1]["done"] == "11"
+
+
+# ---------------------------------------------------------------------------
+# orphaned swapfile detection and the auto-resume service unit
+# ---------------------------------------------------------------------------
+def test_parse_proc_swaps():
+    text = ("Filename                Type        Size    Used    Priority\n"
+            "/swap.img               file        4194300 0       -1\n"
+            "/swapfile               file        16777212 0      -1\n")
+    assert dfrun.parse_proc_swaps(text) == ["/swap.img", "/swapfile"]
+    assert dfrun.parse_proc_swaps("Filename Type\n") == []
+
+
+def test_orphaned_swapfiles_detection(tmp_path):
+    big = tmp_path / "swapfile2"
+    big.write_bytes(b"\0" * 2048)
+    small = tmp_path / "swaptiny"
+    small.write_bytes(b"\0" * 10)
+    other = tmp_path / "notswap.img"
+    other.write_bytes(b"\0" * 2048)
+    candidates = dfrun.list_swapfile_candidates(str(tmp_path), min_bytes=1024)
+    assert candidates == [(str(big), 2048)]  # small and non-swap names ignored
+    # Active swap is not an orphan; inactive is.
+    assert dfrun.orphaned_swapfiles(candidates, active=[str(big)]) == []
+    assert dfrun.orphaned_swapfiles(candidates, active=["/swap.img"]) == [(str(big), 2048)]
+
+
+def test_render_service_unit():
+    params = {
+        "detector": "DFbsMDS", "birds": False, "threshold": 0.8, "maxlag": 60,
+        "batch_size": 8, "threads": 3, "merge_every": 600,
+        "exclude_classes": ["genet", "ibex"],
+    }
+    unit = dfrun.render_service_unit(
+        "rim", "/home/rim/sw", "/media/rim/My Book1", "/home/rim/df_out", params
+    )
+    assert "User=rim" in unit
+    assert "Restart=on-failure" in unit
+    assert "WantedBy=multi-user.target" in unit
+    assert dfrun.MOUNT_SCRIPT_PATH in unit            # drive mounted before start
+    assert "--write-pidfile" in unit                  # single-instance with manual runs
+    assert "--detector DFbsMDS" in unit
+    assert "genet,ibex" in unit
+    assert "'/media/rim/My Book1'" in unit            # space-safe quoting
+    exec_line = unit.split("ExecStart=")[1].split("\n")[0]
+    assert "--birds" not in exec_line                 # birds off must drop the flag
+
+    script = dfrun.render_mount_script("/media/rim/My Book1")
+    assert dfrun.EXPECTED_DRIVE_UUID in script        # waits for the right drive
+    assert "mount -o ro" in script                    # read-only, always
+    assert "'/media/rim/My Book1'" in script
+    assert script.startswith("#!/bin/bash")

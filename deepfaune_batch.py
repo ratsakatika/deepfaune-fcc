@@ -718,6 +718,39 @@ def start_telemetry_thread(out_dir, partition, root, progress, shared, interval=
     return thread
 
 
+def pid_is_worker(pid):
+    """True if pid is a live deepfaune_batch process (by /proc cmdline)."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            return b"deepfaune_batch" in handle.read()
+    except OSError:
+        return False
+
+
+def acquire_pidfile(out_dir, pid=None, alive_check=pid_is_worker):
+    """Claim dfrun.worker.pid, or return False if a live worker holds it.
+
+    This is the same pidfile dfrun writes on a manual launch, so the systemd
+    service and manual runs see each other and never double-classify: a
+    second worker exits quietly instead of racing the first for shards.
+    """
+    path = os.path.join(out_dir, "dfrun.worker.pid")
+    pid = os.getpid() if pid is None else pid
+    try:
+        with open(path, encoding="utf-8") as handle:
+            existing = int(handle.read().strip())
+        if existing != pid and alive_check(existing):
+            return False
+    except (OSError, ValueError):
+        pass  # no pidfile, or stale garbage: claim it
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f"{pid}\n")
+    except OSError:
+        pass  # best-effort; the run itself must not be blocked by this
+    return True
+
+
 class Stopper:
     """Records a SIGINT/SIGTERM request so loops can stop at a clean boundary."""
 
@@ -1184,6 +1217,10 @@ def run(args):
     os.makedirs(out_dir, exist_ok=True)
     setup_logging(out_dir, args.partition)
 
+    if args.write_pidfile and not acquire_pidfile(out_dir):
+        LOG.info("Another live worker holds the pidfile; exiting (single instance)")
+        return 0
+
     # CPU only: hide every GPU from torch so CUDA cannot be selected even by
     # accident. This must run before torch is imported.
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
@@ -1540,15 +1577,24 @@ def build_arg_parser():
              "for excluded classes; only the prediction is constrained.",
     )
     parser.add_argument(
-        "--min-avail-gib", type=float, default=1.5,
-        help="Pause when available RAM falls below this many GiB, and stop "
-             "cleanly if it stays low for 5 minutes (default: 1.5; 0 disables). "
-             "Prevents the out-of-memory killer taking down the system.",
+        "--min-avail-gib", type=float, default=0,
+        help="Optional: pause when available RAM falls below this many GiB and "
+             "stop cleanly if it stays low for 5 minutes. Default 0 (off): the "
+             "run philosophy is to keep going into swap however slowly, with "
+             "oom_score_adj making this worker the kernel's first victim in a "
+             "true emergency and the service/watchdog restarting it.",
     )
     parser.add_argument(
-        "--min-disk-gib", type=float, default=2.0,
+        "--min-disk-gib", type=float, default=0.5,
         help="Stop cleanly when the output disk has less than this many GiB "
-             "free (default: 2.0; 0 disables).",
+             "free (default: 0.5 - only when writes are about to fail anyway; "
+             "0 disables).",
+    )
+    parser.add_argument(
+        "--write-pidfile", action="store_true",
+        help="Write dfrun.worker.pid in the out-dir so dfrun can attach, and "
+             "exit quietly if another live worker already holds it. Used when "
+             "run under the systemd auto-resume service.",
     )
     parser.add_argument(
         "--batch-size", type=int, default=8,

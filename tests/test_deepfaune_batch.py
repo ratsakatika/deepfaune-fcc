@@ -768,3 +768,27 @@ def test_append_telemetry_rotates(tmp_path, monkeypatch):
     # The fresh generation starts with a header again.
     first = (out / "telemetry.p0.csv").read_text(encoding="utf-8").splitlines()[0]
     assert first.startswith("time,")
+
+
+# ---------------------------------------------------------------------------
+# pidfile single-instance guard (service vs manual runs)
+# ---------------------------------------------------------------------------
+def test_acquire_pidfile(tmp_path):
+    out = str(tmp_path)
+    # No pidfile yet: claim it.
+    assert dfb.acquire_pidfile(out, pid=111, alive_check=lambda p: False)
+    assert (tmp_path / "dfrun.worker.pid").read_text().strip() == "111"
+    # A live worker holds it: refuse.
+    assert not dfb.acquire_pidfile(out, pid=222, alive_check=lambda p: True)
+    assert (tmp_path / "dfrun.worker.pid").read_text().strip() == "111"
+    # The holder is dead: claim it over the stale entry.
+    assert dfb.acquire_pidfile(out, pid=333, alive_check=lambda p: False)
+    assert (tmp_path / "dfrun.worker.pid").read_text().strip() == "333"
+    # Re-claiming our own pidfile is fine even if "alive".
+    assert dfb.acquire_pidfile(out, pid=333, alive_check=lambda p: True)
+
+
+def test_guard_defaults_keep_going_philosophy():
+    args = _args()
+    assert args.min_avail_gib == 0      # never stop for memory by default
+    assert args.min_disk_gib == 0.5     # stop only when writes would fail anyway

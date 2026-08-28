@@ -7,10 +7,12 @@ the official DeepFaune v1.4.1 engine. Field machines self-update by pulling
 ## Versioning (do this on every change)
 
 `TOOL_VERSION` in `dfrun.py` is the user-visible version shown in the banner.
-**Increment it in the same commit as any change merged to main**: the patch
-number for fixes, the minor number for new features or new outputs. Never
-merge behaviour changes that leave the version untouched - users then report
-"1.x.y" for two different programs, which has already caused confusion.
+**Increment it in the same commit as any change merged to main**, using the
+owner's scheme: bump the THIRD digit (x.x.1) for small updates and fixes,
+the SECOND digit (x.1.0) for medium features, and the FIRST digit (2.0.0)
+only for complete overhauls. Never merge behaviour changes that leave the
+version untouched - users then report "1.x.y" for two different programs,
+which has already caused confusion.
 
 ## Ground rules
 

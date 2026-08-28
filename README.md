@@ -196,15 +196,34 @@ any crash. `dfrun --diagnose` prints the run settings, the newest samples and
 a one-line verdict on what a dead run died of (memory exhaustion, full disk,
 drive disconnect, reboot/power loss, or software fault).
 
-The worker also protects itself, each guard born from a real incident: it
-volunteers itself to the kernel's out-of-memory killer (so the system
-survives and the resumable worker is the sacrifice), pauses when available
-RAM drops below `--min-avail-gib` (default 1.5) and stops cleanly if the
-pressure lasts, stops before filling the output disk (`--min-disk-gib`,
-default 2), and abandons a shard unwritten if the archive drive vanishes or
-reads start failing en masse - so a disconnect can never be recorded as
-thousands of false "empty" images. Protective stops record their reason in
-`status.p0.json` and the log.
+The run philosophy is to keep going: with swap sized like RAM the worker
+slows down under memory pressure rather than stopping, and nothing halts
+out of caution. The protections are shaped around that, each born from a
+real incident: the worker volunteers itself to the kernel's out-of-memory
+killer (in a true emergency the resumable worker dies, not the desktop or
+systemd - whose deaths once orphaned 13 GiB of shared memory), the launch
+checks for and offers to remove orphaned swapfiles (the only thing that has
+ever filled this disk), the worker stops only when the output disk is
+genuinely about to run out (`--min-disk-gib`, default 0.5), and a shard is
+abandoned unwritten if the archive drive vanishes or reads fail en masse -
+so a disconnect can never be recorded as thousands of false "empty" images
+(that guard cannot fire while the drive is present). An optional
+`--min-avail-gib` pause-under-pressure guard exists but is off by default.
+Protective stops record their reason in `status.p0.json` and the log.
+
+## Auto-resume service
+
+`dfrun --install-service` (plus the usual settings flags) installs a systemd
+unit, `deepfaune-worker.service`, that supervises the worker the standard
+Linux way: it restarts it after a crash or OOM kill (`Restart=on-failure`,
+two minutes later), starts it on every boot after waiting for the archive
+drive and mounting it read-only, and shares the single-instance pidfile so
+manual `dfrun` runs and the service never double-classify. With the service
+installed, a power cut or an OOM kill costs minutes, not a discovery the
+next morning. `systemctl status deepfaune-worker` shows it;
+`sudo systemctl stop deepfaune-worker` pauses it; `dfrun
+--uninstall-service` removes it. `dfrun` attaches to the live readout
+exactly as before.
 
 ## Resume and safety
 

@@ -16,9 +16,11 @@
 
 import argparse
 import csv
+import getpass
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -36,10 +38,11 @@ import deepfaune_batch as dfb  # noqa: E402  (local, stdlib-only at import)
 ### CONSTANTS (edit these in one place)
 ####################################################################################
 TOOL_NAME = "dfrun"
-# Bump on every change merged to main: patch for fixes, minor for features.
-# See CLAUDE.md ("Versioning") - the self-updater shows this to users, so a
-# stale number makes different code report the same version.
-TOOL_VERSION = "1.2.0"
+# Bump on every change merged to main: third digit for small changes, second
+# for medium features, first for complete overhauls. See CLAUDE.md
+# ("Versioning") - the self-updater shows this to users, so a stale number
+# makes different code report the same version.
+TOOL_VERSION = "1.3.0"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -467,6 +470,88 @@ def current_swap_total_bytes():
     except ImportError:
         return 0
     return psutil.swap_memory().total
+
+
+def parse_proc_swaps(text):
+    """Paths of active swap files/partitions from /proc/swaps content."""
+    paths = []
+    for line in text.splitlines()[1:]:
+        parts = line.split()
+        if parts:
+            paths.append(parts[0])
+    return paths
+
+
+def active_swap_paths():
+    try:
+        with open("/proc/swaps", encoding="utf-8") as handle:
+            return parse_proc_swaps(handle.read())
+    except OSError:
+        return []
+
+
+def list_swapfile_candidates(directory="/", min_bytes=dfb.GIB):
+    """Large swap-looking regular files directly in directory: [(path, size)].
+
+    Nothing on this box legitimately creates multi-GiB files at the root of
+    the disk except swap files, so anything matching here that is not active
+    swap is orphaned dead weight (the incident that once filled the disk).
+    """
+    found = []
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return found
+    for name in sorted(names):
+        if not name.startswith("swap"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            if not os.path.isfile(path):
+                continue
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size >= min_bytes:
+            found.append((path, size))
+    return found
+
+
+def orphaned_swapfiles(candidates=None, active=None):
+    """Swap-looking files that are NOT currently in use as swap."""
+    if candidates is None:
+        candidates = list_swapfile_candidates()
+    if active is None:
+        active = active_swap_paths()
+    active_set = {os.path.abspath(p) for p in active}
+    return [(p, s) for p, s in candidates if os.path.abspath(p) not in active_set]
+
+
+def reclaim_orphaned_swapfiles(prompt_fn=None):
+    """Report orphaned swapfiles and offer to remove them (sudo). Best-effort.
+
+    Interactive only: with no prompt function the orphans are reported with
+    the removal command, never deleted silently.
+    """
+    orphans = orphaned_swapfiles()
+    for path, size in orphans:
+        print(
+            f"NOTE: {path} uses {size / dfb.GIB:.0f} GiB of disk but is not "
+            "active swap (orphaned; likely left by a reboot)."
+        )
+        if prompt_fn is None:
+            print(f"  Reclaim the space with: sudo rm {path}")
+            continue
+        reply = prompt_fn(f"  Remove {path} now to reclaim the space (sudo)? [y/N] ")
+        if reply.strip().lower() in ("y", "yes"):
+            try:
+                if subprocess.run(["sudo", "rm", path]).returncode == 0:
+                    print(f"  Removed; {size / dfb.GIB:.0f} GiB reclaimed.")
+                else:
+                    print("  Removal failed; continuing.")
+            except (OSError, subprocess.SubprocessError):
+                print("  Removal failed; continuing.")
+    return orphans
 
 
 def swapfile_status(path="/swapfile"):
@@ -952,6 +1037,138 @@ def read_status(out_dir, partition=0):
 
 
 ####################################################################################
+### AUTO-RESUME SERVICE (--install-service): systemd supervises the worker
+####################################################################################
+SERVICE_NAME = "deepfaune-worker.service"
+SERVICE_PATH = f"/etc/systemd/system/{SERVICE_NAME}"
+MOUNT_SCRIPT_PATH = "/usr/local/bin/deepfaune-mount.sh"
+
+
+def render_mount_script(source, uuid=EXPECTED_DRIVE_UUID):
+    """The root-run pre-start script: wait for the drive, mount it read-only.
+
+    A separate script rather than an inline ExecStartPre because systemd does
+    not understand shell quoting of paths with spaces ("My Book1").
+    """
+    src = shlex.quote(source)
+    return f"""#!/bin/bash
+# Auto-generated by dfrun --install-service. Waits up to 5 minutes for the
+# archive drive (UUID {uuid}) and mounts it read-only. Exits 0 either way;
+# the worker itself reports a missing root.
+for _ in $(seq 60); do
+    blkid -U {uuid} >/dev/null 2>&1 && break
+    sleep 5
+done
+mkdir -p {src}
+mountpoint -q {src} || mount -o ro UUID={uuid} {src} || true
+exit 0
+"""
+
+
+def render_service_unit(user, software_dir, source, out_dir, params):
+    """Render the systemd unit that keeps the worker alive.
+
+    systemd is the auto-resume mechanism (standard practice, no bespoke
+    babysitter process): Restart=on-failure revives the worker after an OOM
+    kill or crash, boot enablement revives it after a power cycle, and the
+    root-privileged pre-start script waits for the archive drive and mounts
+    it read-only first. The worker writes the shared pidfile, so manual
+    dfrun launches and the service never double-classify.
+    """
+    worker_cmd = build_worker_command(software_dir, source, out_dir, params)
+    worker_cmd.append("--write-pidfile")
+    exec_start = " ".join(shlex.quote(part) for part in worker_cmd)
+    return f"""[Unit]
+Description=DeepFaune camera-trap classifier worker (auto-resume)
+After=local-fs.target
+
+[Service]
+Type=simple
+User={user}
+ExecStartPre=+{MOUNT_SCRIPT_PATH}
+ExecStart={exec_start}
+Restart=on-failure
+RestartSec=120
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def install_service(args, out_dir, software_dir):
+    """Write, enable and start the auto-resume unit (needs sudo)."""
+    found = stage_find_source(args)
+    if not found:
+        print("Cannot install the service without the archive drive attached.")
+        return 1
+    source, _uuid = found
+    excluded = dfb.parse_excluded_classes(args.exclude_classes)[0] or []
+    params = {
+        "detector": args.detector, "birds": args.birds,
+        "threshold": args.threshold, "maxlag": args.maxlag,
+        "batch_size": args.batch_size, "threads": args.threads,
+        "merge_every": args.merge_every, "exclude_classes": excluded,
+    }
+    unit = render_service_unit(getpass.getuser(), software_dir, source, out_dir, params)
+    script = render_mount_script(source)
+    os.makedirs(out_dir, exist_ok=True)
+    tmp_unit = os.path.join(out_dir, "deepfaune-worker.service.tmp")
+    tmp_script = os.path.join(out_dir, "deepfaune-mount.sh.tmp")
+    with open(tmp_unit, "w", encoding="utf-8") as handle:
+        handle.write(unit)
+    with open(tmp_script, "w", encoding="utf-8") as handle:
+        handle.write(script)
+    print(f"Installing {SERVICE_NAME} with these settings:")
+    _print_params(params)
+    steps = [
+        ["sudo", "cp", tmp_script, MOUNT_SCRIPT_PATH],
+        ["sudo", "chmod", "755", MOUNT_SCRIPT_PATH],
+        ["sudo", "cp", tmp_unit, SERVICE_PATH],
+        ["sudo", "systemctl", "daemon-reload"],
+        ["sudo", "systemctl", "enable", SERVICE_NAME],
+        ["sudo", "systemctl", "start", SERVICE_NAME],
+    ]
+    for cmd in steps:
+        try:
+            if subprocess.run(cmd).returncode != 0:
+                print(f"Failed at: {' '.join(cmd)}")
+                return 1
+        except (OSError, subprocess.SubprocessError) as err:
+            print(f"Failed at: {' '.join(cmd)} ({err})")
+            return 1
+    for tmp in (tmp_unit, tmp_script):
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    print(
+        "Installed. The worker now survives crashes, OOM kills and reboots:\n"
+        f"  status:  systemctl status {SERVICE_NAME}\n"
+        f"  logs:    journalctl -u {SERVICE_NAME} -f\n"
+        f"  pause:   sudo systemctl stop {SERVICE_NAME}\n"
+        f"  remove:  dfrun --uninstall-service\n"
+        "dfrun still attaches to the live readout as before."
+    )
+    return 0
+
+
+def uninstall_service():
+    """Disable and remove the auto-resume unit (needs sudo)."""
+    for cmd in (
+        ["sudo", "systemctl", "disable", "--now", SERVICE_NAME],
+        ["sudo", "rm", "-f", SERVICE_PATH, MOUNT_SCRIPT_PATH],
+        ["sudo", "systemctl", "daemon-reload"],
+    ):
+        try:
+            subprocess.run(cmd)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    print(f"{SERVICE_NAME} removed (any running worker was stopped).")
+    return 0
+
+
+####################################################################################
 ### DIAGNOSTICS (--diagnose): read the flight recorder and explain the state
 ####################################################################################
 def boot_time_unix():
@@ -1357,7 +1574,10 @@ def stage_configure(args, out_dir):
 
 
 def stage_swap(args):
-    """Stage 4 (swap): check total swap and offer to create a swapfile."""
+    """Stage 4 (swap): reclaim orphaned swapfiles, then check total swap."""
+    # The only thing that has ever filled this disk is orphaned swapfiles;
+    # catch them at launch rather than stopping a run days later.
+    reclaim_orphaned_swapfiles(prompt_fn=None if args.yes else _default_prompt)
     total = current_swap_total_bytes()
     print(f"Swap total: {gib(total):.1f} GiB")
     # Non-interactive override by flag (sizes the swapfile up or down).
@@ -1599,6 +1819,8 @@ def build_arg_parser():
     parser.add_argument("--attach", action="store_true", help="Attach to the live readout of a running worker and exit.")
     parser.add_argument("--dashboard", action="store_true", help="Build and open the dashboard from the current results, then exit.")
     parser.add_argument("--diagnose", action="store_true", help="Print run settings, the flight recorder tail, and a crash/health verdict, then exit.")
+    parser.add_argument("--install-service", action="store_true", help="Install a systemd service that auto-resumes the worker after crashes, OOM kills and reboots, using the settings given on this command line (needs sudo).")
+    parser.add_argument("--uninstall-service", action="store_true", help="Disable and remove the auto-resume service (needs sudo).")
     parser.add_argument("--no-update", action="store_true", help="Skip the self-update check this launch.")
     parser.add_argument("--update-check", choices=("auto", "never"), default=None,
                         help="Persist the update-check preference (auto or never; default: auto).")
@@ -1631,6 +1853,11 @@ def main(argv=None):
         return run_diagnose(out_dir)
 
     stage_banner()
+
+    if args.uninstall_service:
+        return uninstall_service()
+    if args.install_service:
+        return install_service(args, out_dir, software_dir)
 
     # Stage 0: self-update (before any work). Never under a live worker.
     self_update_check(args, _HERE, worker_running(out_dir))

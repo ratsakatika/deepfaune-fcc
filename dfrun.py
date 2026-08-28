@@ -217,6 +217,11 @@ def decide_update(fetch_ok, dirty, worker_running, on_branch, ff_possible, behin
     """
     if not fetch_ok:
         return "skip", "remote unreachable"
+    # Being up to date is decided BEFORE any refusal: a refusal message reads
+    # "update available but not applied", which must never be printed when
+    # there is no update (e.g. attaching to a live worker while current).
+    if behind <= 0 and ff_possible:
+        return "current", "already up to date"
     if worker_running:
         return "refuse", "a classification worker is running; not changing code under a live run"
     if dirty:
@@ -225,8 +230,6 @@ def decide_update(fetch_ok, dirty, worker_running, on_branch, ff_possible, behin
         return "refuse", f"not on the {UPDATE_BRANCH} branch"
     if not ff_possible:
         return "refuse", "local branch has diverged; fast-forward not possible"
-    if behind <= 0:
-        return "current", "already up to date"
     return "update", f"{behind} commits behind"
 
 

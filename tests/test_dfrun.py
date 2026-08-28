@@ -185,6 +185,12 @@ def test_decide_update_scenarios():
     assert dfrun.decide_update(True, False, False, False, True, 3)[0] == "refuse"  # wrong branch
     assert dfrun.decide_update(True, False, False, True, False, 3)[0] == "refuse"  # diverged
     assert dfrun.decide_update(True, False, False, True, True, 0)[0] == "current"  # up to date
+    # Up to date wins over every refusal: no "update available" lie while a
+    # worker runs (the bug this ordering fixes), nor for dirty/wrong-branch.
+    assert dfrun.decide_update(True, False, True, True, True, 0)[0] == "current"   # worker + current
+    assert dfrun.decide_update(True, True, False, False, True, 0)[0] == "current"  # dirty, off-branch + current
+    # Diverged with behind=0 is NOT "current": remote history was rewritten.
+    assert dfrun.decide_update(True, False, False, True, False, 0)[0] == "refuse"
 
 
 def _mock_git(monkeypatch, *, fetch, dirty, branch, ff, behind, pull_ok=True):

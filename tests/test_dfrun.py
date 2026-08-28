@@ -567,27 +567,21 @@ def test_orphaned_swapfiles_detection(tmp_path):
 
 
 def test_render_service_unit():
-    params = {
-        "detector": "DFbsMDS", "birds": False, "threshold": 0.8, "maxlag": 60,
-        "batch_size": 8, "threads": 3, "merge_every": 600,
-        "exclude_classes": ["genet", "ibex"],
-    }
-    unit = dfrun.render_service_unit(
-        "rim", "/home/rim/sw", "/media/rim/My Book1", "/home/rim/df_out", params
-    )
+    unit = dfrun.render_service_unit("rim", "/home/rim/sw", "/home/rim/df_out")
     assert "User=rim" in unit
-    assert "Restart=on-failure" in unit
-    assert "WantedBy=multi-user.target" in unit
-    assert dfrun.MOUNT_SCRIPT_PATH in unit            # drive mounted before start
-    assert "--write-pidfile" in unit                  # single-instance with manual runs
-    assert "--detector DFbsMDS" in unit
-    assert "genet,ibex" in unit
-    assert "'/media/rim/My Book1'" in unit            # space-safe quoting
-    exec_line = unit.split("ExecStart=")[1].split("\n")[0]
-    assert "--birds" not in exec_line                 # birds off must drop the flag
+    assert "Restart=on-failure" in unit                # violent deaths only:
+    # a clean stop (dfrun --stop, systemctl stop, finished run, protective
+    # stop) exits 0 and stays stopped - the user is never locked into a run.
+    assert dfrun.MOUNT_SCRIPT_PATH in unit             # drive mounted before start
+    assert "--resume-last" in unit                     # current run's OWN settings
+    assert "--write-pidfile" in unit                   # single-instance with manual runs
+    # No settings are baked into the unit; they come from run metadata.
+    assert "--detector" not in unit
+    assert "--threshold" not in unit
 
-    script = dfrun.render_mount_script("/media/rim/My Book1")
-    assert dfrun.EXPECTED_DRIVE_UUID in script        # waits for the right drive
-    assert "mount -o ro" in script                    # read-only, always
-    assert "'/media/rim/My Book1'" in script
+    script = dfrun.render_mount_script("/media/rim/My Book1", "/home/rim/df_out")
+    assert dfrun.EXPECTED_DRIVE_UUID in script         # waits for the right drive
+    assert "mount -o ro" in script                     # read-only, always
+    assert "run_metadata.p0.json" in script            # root follows the current run
+    assert "'/media/rim/My Book1'" in script           # install-time fallback
     assert script.startswith("#!/bin/bash")

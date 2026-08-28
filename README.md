@@ -213,17 +213,22 @@ Protective stops record their reason in `status.p0.json` and the log.
 
 ## Auto-resume service
 
-`dfrun --install-service` (plus the usual settings flags) installs a systemd
-unit, `deepfaune-worker.service`, that supervises the worker the standard
-Linux way: it restarts it after a crash or OOM kill (`Restart=on-failure`,
-two minutes later), starts it on every boot after waiting for the archive
-drive and mounting it read-only, and shares the single-instance pidfile so
-manual `dfrun` runs and the service never double-classify. With the service
-installed, a power cut or an OOM kill costs minutes, not a discovery the
-next morning. `systemctl status deepfaune-worker` shows it;
-`sudo systemctl stop deepfaune-worker` pauses it; `dfrun
---uninstall-service` removes it. `dfrun` attaches to the live readout
-exactly as before.
+`dfrun --install-service` installs a systemd unit, `deepfaune-worker.service`,
+that restarts the worker two minutes after a violent death - an out-of-memory
+kill or a crash - and ONLY then. It never resurrects a run that ended any
+other way: a finished run, a protective stop, `dfrun --stop` and
+`sudo systemctl stop deepfaune-worker` all stay stopped, and nothing
+autostarts at boot (after a power cut, open Run DeepFaune to continue). So
+the user is never locked into a run they meant to end.
+
+No settings are baked in at install time: each start reads
+`run_metadata.p0.json` and resumes the CURRENT run exactly as it was
+launched (`--resume-last`), mounting the archive drive read-only at the
+run's own recorded root first. With the service installed, `dfrun` launches
+runs under systemd automatically (writing the confirmed settings to the
+metadata before starting) and still attaches to the live readout as before;
+the shared pidfile means the service and manual runs never double-classify.
+`dfrun --uninstall-service` removes it.
 
 ## Resume and safety
 

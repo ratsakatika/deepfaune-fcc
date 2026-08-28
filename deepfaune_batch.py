@@ -37,6 +37,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -538,6 +539,185 @@ class Progress:
         )
 
 
+####################################################################################
+### SELF-PROTECTION AND TELEMETRY (stdlib-only)
+###
+### Guards born from real incidents on the FCC box: an OOM kill that took out
+### system processes and left orphaned shared memory (so the worker now
+### volunteers itself to the OOM killer and pauses under memory pressure), a
+### disk filled to 0 bytes (so the worker stops before filling it), and an
+### archive drive that could vanish mid-run (which would otherwise be recorded
+### as thousands of false "empty" images). The telemetry file is a flight
+### recorder: one line every ~30s, so the final lines diagnose any crash.
+####################################################################################
+GIB = 1024 ** 3
+
+
+def parse_meminfo(text):
+    """Parse /proc/meminfo content into {field: bytes}."""
+    info = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].endswith(":"):
+            try:
+                info[parts[0][:-1]] = int(parts[1]) * 1024
+            except ValueError:
+                pass
+    return info
+
+
+def read_meminfo():
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            return parse_meminfo(handle.read())
+    except OSError:
+        return {}
+
+
+def disk_free_bytes(path):
+    """Free bytes on path's filesystem, or None if unknowable."""
+    try:
+        st = os.statvfs(path)
+        return st.f_bavail * st.f_frsize
+    except OSError:
+        return None
+
+
+def worker_rss_bytes():
+    """This process's resident set size in bytes, or None."""
+    try:
+        with open("/proc/self/status", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def prefer_self_for_oom_kill():
+    """Ask the kernel to kill THIS process first under memory pressure.
+
+    The OOM incidents on the FCC box killed system processes (systemd,
+    gnome-shell) and left gigabytes of orphaned shared memory behind. The
+    worker is the resumable process, so it should be the kernel's first
+    choice of victim: it dies cleanly redone-on-resume, and the rest of the
+    system survives. Best-effort; returns True on success.
+    """
+    try:
+        with open("/proc/self/oom_score_adj", "w", encoding="utf-8") as handle:
+            handle.write("500")
+        return True
+    except OSError:
+        return False
+
+
+def memory_pressure(meminfo, min_avail_gib):
+    """Return (is_low, available_gib) given a parsed meminfo."""
+    avail = meminfo.get("MemAvailable")
+    if avail is None:
+        return False, None
+    return avail < min_avail_gib * GIB, avail / GIB
+
+
+def shard_reads_failing(skipped_delta, attempted, min_failures=25, fraction=0.5):
+    """True when a shard's image reads are failing en masse (drive vanished).
+
+    Both conditions must hold: an absolute floor so a handful of genuinely
+    corrupt files never aborts a shard, and a fraction so a large shard with
+    a sprinkling of bad files keeps going. En-masse failure means the images
+    themselves are unreachable; writing the shard would record false empties.
+    """
+    if attempted <= 0:
+        return False
+    return skipped_delta >= min_failures and skipped_delta >= fraction * attempted
+
+
+# One flight-recorder sample per interval; the newest lines are the evidence
+# after any crash. Kept small (~100 bytes/line) and rotated once when large.
+TELEMETRY_FIELDS = [
+    "time", "state", "done", "rate_img_s", "mem_available_gib", "shmem_gib",
+    "swap_used_gib", "worker_rss_gib", "disk_free_gib", "load1", "root_ok",
+]
+TELEMETRY_MAX_BYTES = 2_000_000
+
+
+def telemetry_sample(state, done, rate, out_dir, root):
+    """Collect one flight-recorder sample (stdlib /proc reads; cheap)."""
+    meminfo = read_meminfo()
+    swap_total = meminfo.get("SwapTotal")
+    swap_free = meminfo.get("SwapFree")
+    swap_used = (
+        swap_total - swap_free
+        if swap_total is not None and swap_free is not None else None
+    )
+    try:
+        load1 = round(os.getloadavg()[0], 2)
+    except OSError:
+        load1 = ""
+
+    def in_gib(value):
+        return round(value / GIB, 2) if value is not None else ""
+
+    return {
+        "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "state": state,
+        "done": done,
+        "rate_img_s": round(rate, 2),
+        "mem_available_gib": in_gib(meminfo.get("MemAvailable")),
+        "shmem_gib": in_gib(meminfo.get("Shmem")),
+        "swap_used_gib": in_gib(swap_used),
+        "worker_rss_gib": in_gib(worker_rss_bytes()),
+        "disk_free_gib": in_gib(disk_free_bytes(out_dir)),
+        "load1": load1,
+        "root_ok": 1 if os.path.isdir(root) else 0,
+    }
+
+
+def append_telemetry(out_dir, partition, sample):
+    """Append one sample to telemetry.p<partition>.csv; rotate once when large.
+
+    Best-effort and fsynced: a crash or power cut must not lose the very
+    lines that would explain it.
+    """
+    path = os.path.join(out_dir, f"telemetry.p{partition}.csv")
+    try:
+        need_header = not os.path.exists(path)
+        if not need_header and os.path.getsize(path) > TELEMETRY_MAX_BYTES:
+            os.replace(path, path + ".old")  # keep one previous generation
+            need_header = True
+        with open(path, "a", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=TELEMETRY_FIELDS)
+            if need_header:
+                writer.writeheader()
+            writer.writerow(sample)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except (OSError, ValueError):
+        pass
+
+
+def start_telemetry_thread(out_dir, partition, root, progress, shared, interval=30):
+    """Start the flight recorder as a daemon thread.
+
+    A thread rather than a hook on the heartbeat: under memory thrash the
+    batch loop stalls exactly when evidence matters most, while this thread
+    keeps sampling. `shared` is a dict the main loop updates ({"state": ...,
+    "exit": ...}); reads of its values are atomic enough for telemetry.
+    """
+    def loop():
+        while not shared.get("exit"):
+            append_telemetry(out_dir, partition, telemetry_sample(
+                shared.get("state", "running"),
+                progress.true_done, progress.rate(), out_dir, root,
+            ))
+            time.sleep(interval)
+
+    thread = threading.Thread(target=loop, name="telemetry", daemon=True)
+    thread.start()
+    return thread
+
+
 class Stopper:
     """Records a SIGINT/SIGTERM request so loops can stop at a clean boundary."""
 
@@ -791,7 +971,7 @@ def build_rows(predictor):
 
 def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
                   batch_size, detector_name, stopper, heartbeat_secs, progress,
-                  shard_label, report=None, excluded_lang=()):
+                  shard_label, report=None, excluded_lang=(), guard=None):
     """Run the engine over one shard.
 
     Returns the list of CSV rows, or None if a stop was requested mid-shard (in
@@ -800,7 +980,9 @@ def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
     the optional report callback refreshes the status file on each heartbeat.
     excluded_lang are animal class labels IN THE RUN LANGUAGE the classifier
     must never predict (the engine drops them from the candidate set; their
-    raw score columns are still recorded).
+    raw score columns are still recorded). guard, if given, is called on each
+    heartbeat with the number of images attempted so far; returning True
+    abandons the shard unwritten (the guard logs its own reason).
     """
     predictor = predict_tools.PredictorImage(
         image_paths,
@@ -837,6 +1019,12 @@ def process_shard(predict_tools, image_paths, threshold, maxlag, lang, birds,
             )
             if report is not None:
                 report(shard_label, "running")
+            if guard is not None and guard(min(k2, total)):
+                LOG.error(
+                    "  abandoning shard %s at image %d/%d (protective stop; "
+                    "redo on resume)", shard_label, min(k2, total), total,
+                )
+                return None
             last_hb = now
     return build_rows(predictor)
 
@@ -1131,10 +1319,17 @@ def run(args):
     progress = Progress(archive_total, done_start)
     start_unix = time.time()
 
+    # halt["reason"] records WHY a protective stop happened; it lands in the
+    # status file and the diagnosis tooling reads it after the fact.
+    halt = {"reason": None}
+    telemetry_shared = {"state": "running", "exit": False}
+
     def report(current_shard, state):
+        telemetry_shared["state"] = state
         write_status(out_dir, args.partition, {
             "pid": os.getpid(),
             "state": state,
+            "reason": halt["reason"],
             "start_time_unix": start_unix,
             "updated_unix": time.time(),
             "current_shard": current_shard,
@@ -1163,6 +1358,61 @@ def run(args):
     signal.signal(signal.SIGINT, stopper.handle)
     signal.signal(signal.SIGTERM, stopper.handle)
 
+    # Under memory pressure the kernel should sacrifice this resumable worker,
+    # not the desktop or systemd (the historical OOM cascade on this box).
+    if prefer_self_for_oom_kill():
+        LOG.info("OOM preference set: this worker dies first under memory pressure")
+
+    start_telemetry_thread(out_dir, args.partition, root, progress, telemetry_shared)
+
+    def make_shard_guard(shard_skipped_start):
+        """Heartbeat guard for one shard: True aborts the shard unwritten.
+
+        Ordered by severity: a vanished archive root or mass read failures
+        must abort before empties are recorded; a nearly-full disk stops
+        before the OS is starved; low memory pauses (up to 5 minutes) and
+        only stops if pressure does not lift. Every protective stop also
+        stops the whole run (finished shards are safe; resume redoes the rest).
+        """
+        def guard(attempted):
+            reason = None
+            if not os.path.isdir(root):
+                reason = "source-missing: the archive root vanished"
+            else:
+                delta = skipped["count"] - shard_skipped_start
+                if shard_reads_failing(delta, attempted):
+                    reason = f"source-unreadable: {delta} read failures in this shard"
+            if reason is None and args.min_disk_gib > 0:
+                free = disk_free_bytes(out_dir)
+                if free is not None and free < args.min_disk_gib * GIB:
+                    reason = f"low-disk: {free / GIB:.1f} GiB free in out-dir"
+            if reason is None and args.min_avail_gib > 0:
+                for attempt in range(10):
+                    low, avail = memory_pressure(read_meminfo(), args.min_avail_gib)
+                    if not low:
+                        if attempt:
+                            LOG.warning(
+                                "Memory recovered (%.1f GiB available); resuming",
+                                avail,
+                            )
+                        break
+                    LOG.warning(
+                        "Low memory: %.1f GiB available (< %.1f GiB); pausing "
+                        "30s (%d/10)", avail, args.min_avail_gib, attempt + 1,
+                    )
+                    time.sleep(30)
+                else:
+                    reason = (
+                        f"low-memory: {avail:.1f} GiB available after 5 minutes paused"
+                    )
+            if reason is None:
+                return False
+            halt["reason"] = reason
+            stopper.stop = True  # do not march on into the same wall
+            LOG.error("Protective stop: %s", reason)
+            return True
+        return guard
+
     report(None, "running")
     processed = 0
     last_merge = time.monotonic()
@@ -1190,6 +1440,7 @@ def run(args):
             heartbeat_secs=args.heartbeat_secs, progress=progress,
             shard_label=shard_label, report=report,
             excluded_lang=excluded_lang,
+            guard=make_shard_guard(skipped["count"]),
         )
         if rows is None:  # aborted mid-shard by a signal
             break
@@ -1220,6 +1471,11 @@ def run(args):
         skipped["fh"].close()
     final_state = "stopped" if stopper.stop else "finished"
     report(None, final_state)
+    # One last flight-recorder line with the final state, then stop the thread.
+    telemetry_shared["exit"] = True
+    append_telemetry(out_dir, args.partition, telemetry_sample(
+        final_state, progress.true_done, progress.rate(), out_dir, root,
+    ))
     LOG.info(
         "Run ended (%s): %d shards written this session | %s | "
         "skipped unreadable: %d",
@@ -1282,6 +1538,17 @@ def build_arg_parser():
              "never predict (impossible species for the survey area), e.g. "
              "'ibex,marmot,genet'. Raw per-class scores are still recorded "
              "for excluded classes; only the prediction is constrained.",
+    )
+    parser.add_argument(
+        "--min-avail-gib", type=float, default=1.5,
+        help="Pause when available RAM falls below this many GiB, and stop "
+             "cleanly if it stays low for 5 minutes (default: 1.5; 0 disables). "
+             "Prevents the out-of-memory killer taking down the system.",
+    )
+    parser.add_argument(
+        "--min-disk-gib", type=float, default=2.0,
+        help="Stop cleanly when the output disk has less than this many GiB "
+             "free (default: 2.0; 0 disables).",
     )
     parser.add_argument(
         "--batch-size", type=int, default=8,

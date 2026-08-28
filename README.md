@@ -187,6 +187,25 @@ rebuilt in the background each time the master is updated, so you can open it
 early to watch the results grow. To rebuild it on demand without a run, use
 `dfrun --dashboard`.
 
+## Diagnostics and self-protection
+
+The worker keeps a flight recorder: one line every ~30 seconds in
+`telemetry.p0.csv` (memory, swap, shared memory, disk, load, worker size,
+whether the archive drive is reachable), fsynced so the final lines survive
+any crash. `dfrun --diagnose` prints the run settings, the newest samples and
+a one-line verdict on what a dead run died of (memory exhaustion, full disk,
+drive disconnect, reboot/power loss, or software fault).
+
+The worker also protects itself, each guard born from a real incident: it
+volunteers itself to the kernel's out-of-memory killer (so the system
+survives and the resumable worker is the sacrifice), pauses when available
+RAM drops below `--min-avail-gib` (default 1.5) and stops cleanly if the
+pressure lasts, stops before filling the output disk (`--min-disk-gib`,
+default 2), and abandons a shard unwritten if the archive drive vanishes or
+reads start failing en masse - so a disconnect can never be recorded as
+thousands of false "empty" images. Protective stops record their reason in
+`status.p0.json` and the log.
+
 ## Resume and safety
 
 - Resumable: each shard's CSV is written atomically, and a shard that already

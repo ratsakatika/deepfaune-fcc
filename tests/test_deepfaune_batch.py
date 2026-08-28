@@ -792,3 +792,57 @@ def test_guard_defaults_keep_going_philosophy():
     args = _args()
     assert args.min_avail_gib == 0      # never stop for memory by default
     assert args.min_disk_gib == 0.5     # stop only when writes would fail anyway
+
+
+# ---------------------------------------------------------------------------
+# --resume-last: restore the current run's own settings from its metadata
+# ---------------------------------------------------------------------------
+def test_apply_resume_metadata_restores_everything():
+    args = _args()
+    metadata = {
+        "detector": "DFbsMDS", "threshold": 0.8, "maxlag": 60, "birds": False,
+        "lang": "en", "batch_size": 8, "threads": 3, "merge_every": 600,
+        "heartbeat_secs": 30, "root": "/media/rim/My Book1",
+        "excluded_classes": ["genet", "ibex"],
+    }
+    applied = dfb.apply_resume_metadata(args, metadata)
+    assert args.detector == "DFbsMDS"
+    assert args.threshold == 0.8
+    assert args.maxlag == 60
+    assert args.birds is False
+    assert args.threads == 3
+    assert args.root == "/media/rim/My Book1"
+    assert args.exclude_classes == "genet,ibex"
+    assert ("detector", "DFbsMDS") in applied
+
+
+def test_apply_resume_metadata_tolerates_old_schema():
+    # Metadata from an older version lacks threads/merge_every: keep defaults.
+    args = _args()
+    default_threads = args.threads
+    dfb.apply_resume_metadata(args, {"detector": "MDS"})
+    assert args.detector == "MDS"
+    assert args.threads == default_threads
+
+
+def test_resume_last_without_metadata_exits_cleanly(tmp_path):
+    # Exit 0, not an error: a supervisor must not restart-loop on "nothing
+    # to resume".
+    rc = dfb.main(["--out-dir", str(tmp_path), "--resume-last"])
+    assert rc == 0
+
+
+def test_run_metadata_records_resume_fields(tmp_path):
+    sw = tmp_path / "sw"
+    sw.mkdir()
+    out = tmp_path / "out"
+    out.mkdir()
+    args = _args(threads=3, merge_every=600, heartbeat_secs=30)
+    _path, meta = dfb.write_run_metadata(str(out), str(sw), "/root", args)
+    # Every field a resume needs is recorded.
+    for field in dfb.RESUME_FIELDS:
+        if field in ("root",):
+            continue
+        assert field in meta, field
+    assert meta["threads"] == 3
+    assert meta["heartbeat_secs"] == 30

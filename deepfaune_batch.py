@@ -825,6 +825,9 @@ def build_run_metadata(out_dir, software_dir, root, args):
         )[0] or [],
         "lang": args.lang,
         "batch_size": args.batch_size,
+        "threads": args.threads,
+        "merge_every": args.merge_every,
+        "heartbeat_secs": args.heartbeat_secs,
         "deepfaune_version": read_deepfaune_version(software_dir),
         "weights": collect_weight_info(software_dir),
         "root": root,
@@ -1591,6 +1594,13 @@ def build_arg_parser():
              "0 disables).",
     )
     parser.add_argument(
+        "--resume-last", action="store_true",
+        help="Load every setting (detector, threshold, exclusions, root and "
+             "so on) from run_metadata.p<partition>.json in --out-dir - i.e. "
+             "resume the current run exactly as it was launched. Used by the "
+             "auto-resume service; exits quietly if there is nothing to resume.",
+    )
+    parser.add_argument(
         "--write-pidfile", action="store_true",
         help="Write dfrun.worker.pid in the out-dir so dfrun can attach, and "
              "exit quietly if another live worker already holds it. Used when "
@@ -1647,8 +1657,61 @@ def build_arg_parser():
     return parser
 
 
+# Metadata fields a resume restores, mapped to their args attributes. root is
+# included: the resume must classify the same archive the run was started on.
+RESUME_FIELDS = {
+    "detector": "detector",
+    "threshold": "threshold",
+    "maxlag": "maxlag",
+    "birds": "birds",
+    "lang": "lang",
+    "batch_size": "batch_size",
+    "threads": "threads",
+    "merge_every": "merge_every",
+    "heartbeat_secs": "heartbeat_secs",
+    "root": "root",
+}
+
+
+def apply_resume_metadata(args, metadata):
+    """Overwrite args with the settings recorded in a run's metadata.
+
+    Fields absent from the metadata (older versions recorded fewer) keep the
+    parser defaults. Returns the list of (field, value) applied, for logging.
+    """
+    applied = []
+    for field, attr in RESUME_FIELDS.items():
+        if field in metadata and metadata[field] is not None:
+            setattr(args, attr, metadata[field])
+            applied.append((field, metadata[field]))
+    excluded = metadata.get("excluded_classes")
+    if excluded is not None:
+        args.exclude_classes = ",".join(excluded)
+        applied.append(("excluded_classes", excluded))
+    return applied
+
+
+def load_resume_metadata(out_dir, partition):
+    path = os.path.join(out_dir, f"run_metadata.p{partition}.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
+    if args.resume_last:
+        metadata = load_resume_metadata(os.path.abspath(args.out_dir), args.partition)
+        if not metadata:
+            # Nothing to resume; exit cleanly so a supervisor does not loop.
+            print("resume-last: no run metadata found; nothing to resume")
+            return 0
+        applied = apply_resume_metadata(args, metadata)
+        print("resume-last: restored " + ", ".join(
+            f"{field}={value}" for field, value in applied
+        ))
     # Reject contradictory mode combinations: --dry-run and --merge are each
     # standalone terminal modes and cannot be requested together.
     if args.dry_run and args.merge:

@@ -183,20 +183,6 @@ tr.photorow td{background:var(--night2);white-space:normal}
 
 <div class="eyebrow"><span class="pdot"></span>Wildlife camera-trap survey &middot; F&#259;g&#259;ra&#537; Mountains, Romania &middot; <span id="th_years">&mdash;</span></div>
 <h1><span id="th_stn">&mdash;</span> cameras across the<br><span class="em">F&#259;g&#259;ra&#537; Mountains</span>.</h1>
-<div class="scopebar" id="scopebar">
-  <span class="lbl">Show</span>
-  <div class="toggle" id="scopeTog">
-    <button data-v="survey" class="on">Official survey</button>
-    <button data-v="all">All images</button>
-  </div>
-  <span class="cap" id="scopeNote">systematic survey only</span>
-</div>
-<p class="thesis">Spread across a stretch of the Southern Carpathians in Romania, the cameras recorded
-<b id="th_img">&mdash;</b> between <b id="th_d0">&mdash;</b> and <b id="th_d1">&mdash;</b>. Most frames were empty; the rest
-hold <b id="th_det">&mdash;</b> across <span id="th_animal">&mdash;</span> kinds of animal, from squirrels and roe deer
-to bear, wolf and bison. This dashboard shows what moved through these mountains, where, and when,
-under the thresholds and species filters you set below.</p>
-<div class="kpis" id="kpis"></div>
 
 <!-- ================= 01 LOAD ================= -->
 <section class="section" id="p-load">
@@ -218,6 +204,16 @@ under the thresholds and species filters you set below.</p>
     <div id="loadnote" hidden></div>
   </div>
 </section>
+
+<!-- ================= STATS (from the loaded CSV, under the current filters) -->
+<div id="statsblock" hidden>
+<p class="thesis">Spread across a stretch of the Southern Carpathians in Romania, the cameras recorded
+<b id="th_img">&mdash;</b> between <b id="th_d0">&mdash;</b> and <b id="th_d1">&mdash;</b>. Most frames were empty; the rest
+hold <b id="th_det">&mdash;</b> across <span id="th_animal">&mdash;</span> kinds of animal, from squirrels and roe deer
+to bear, wolf and bison. This dashboard shows what moved through these mountains, where, and when,
+under the scope, thresholds and species filters you set below.</p>
+<div class="kpis" id="kpis"></div>
+</div>
 
 <!-- ================= 02 FILTERS ================= -->
 <section class="section off" id="p-filter">
@@ -243,6 +239,14 @@ under the thresholds and species filters you set below.</p>
         <input type="number" id="minlen" min="0" step="1" value="0" aria-label="Minimum sequence length in seconds">
         <div class="sub">Elapsed time from the first to the last photograph in the
         event. A single-photograph event is 0 seconds.</div>
+      </div>
+      <div class="field" id="scopebar">
+        <span class="lbl">Scope</span>
+        <div class="toggle" id="scopeTog" style="margin-top:2px">
+          <button data-v="survey" class="on">Official survey</button>
+          <button data-v="all">All images</button>
+        </div>
+        <div class="sub" id="scopeNote">systematic survey only</div>
       </div>
       <div class="field">
         <span class="lbl">Include non-animal events</span>
@@ -306,7 +310,7 @@ under the thresholds and species filters you set below.</p>
   <div class="controls">
     <span class="lbl">Show</span><select id="mapSel"></select>
     <span class="cap" id="protStatus"></span>
-    <span class="savebtns"><button class="mini" id="protPick" hidden>Load field protocol (.xlsx)</button></span>
+    <span class="savebtns"><button class="mini" id="protPick" hidden>Use a different protocol (.xlsx)</button></span>
     <input type="file" id="protFile" accept=".xlsx" hidden>
   </div>
   <div class="card" id="fig_M"></div>
@@ -1077,6 +1081,7 @@ function buildDerived() {
 /* ============================ header + KPIs ============================= */
 function renderScalars() {
   const R = S.results;
+  $("statsblock").hidden = false;
   const stn = R.stations.size;
   const d0 = isFinite(R.d0) ? new Date(R.d0) : null, d1 = isFinite(R.d1) ? new Date(R.d1) : null;
   const years = d0 && d1 ? (d0.getFullYear() === d1.getFullYear()
@@ -1292,7 +1297,12 @@ function setSeasonMode(m) {
 }
 
 /* ----- camera-grid map: positions from the field protocol ----- */
-var PROT = null, MAPOBJ = null, MAPMARKERS = [], curMap = "All wildlife";
+/* The 2023 field protocol (FieldProtocols_WTM_FAR_23.xlsx, sheet Koordinaten)
+   is embedded here so the map works out of the box; a protocol file next to
+   the page, or one loaded via the picker, replaces it. */
+const PROT_EMBED = {"WTM_FAR005":{"lat":45.58998,"lon":25.03875,"setup":"31 May 2023","time":"10:48","by":"Madalin Mocanu"},"WTM_FAR013":{"lat":45.58092,"lon":25.03883,"setup":"10 May 2023","time":"10:48","by":"Wildlife volunteers"},"WTM_FAR014":{"lat":45.58081,"lon":25.05145,"setup":"26 Apr 2023","time":"14:46","by":"Zsolt Miholcea"},"WTM_FAR015":{"lat":45.58064,"lon":25.06429,"setup":"27 Apr 2023","time":"13:03","by":"Zsolt Miholcea"},"WTM_FAR016":{"lat":45.58082,"lon":25.07735,"setup":"27 Apr 2023","time":"11:34","by":"Zsolt Miholcea"},"WTM_FAR019":{"lat":45.57167,"lon":24.96205,"setup":"29 May 2023","time":"17:19","by":"Madalin Mocanu"},"WTM_FAR024":{"lat":45.57196,"lon":25.0259,"setup":"10 May 2023","time":"13:26","by":"Ruben Iosif"},"WTM_FAR025":{"lat":45.57174,"lon":25.03887,"setup":"10 May 2023","time":"12:35","by":"Wildlife volunteers"},"WTM_FAR026":{"lat":45.57196,"lon":25.05164,"setup":"10 May 2023","time":"14:54","by":"Wildlife volunteers"},"WTM_FAR027":{"lat":45.57175,"lon":25.0641,"setup":"26 Apr 2023","time":"13:00","by":"Zsolt Miholcea"},"WTM_FAR030":{"lat":45.57175,"lon":25.10308,"setup":"3 May 2023","time":"12:14","by":"Adrian Idor"},"WTM_FAR031":{"lat":45.57187,"lon":25.11554,"setup":"3 May 2023","time":"13:42","by":"Adrian Idor"},"WTM_FAR033":{"lat":45.56272,"lon":24.97482,"setup":"29 May 2023","time":"15:46","by":"Madalin Mocanu"},"WTM_FAR037":{"lat":45.56288,"lon":25.02592,"setup":"10 May 2023","time":"15:31","by":"Ruben Iosif"},"WTM_FAR040":{"lat":45.56291,"lon":25.06462,"setup":"4 May 2023","time":"12:12","by":"Wildlife volunteers"},"WTM_FAR043":{"lat":45.56257,"lon":25.10277,"setup":"5 Apr 2023","time":"11:33","by":"Ruben Iosif"},"WTM_FAR044":{"lat":45.56278,"lon":25.11546,"setup":"3 Apr 2023","time":"17:51","by":"Zsolt Miholcea"},"WTM_FAR045":{"lat":45.56278,"lon":25.12846,"setup":"3 Apr 2023","time":"16:09","by":"Zsolt Miholcea"},"WTM_FAR047":{"lat":45.55389,"lon":24.9748,"setup":"17 May 2023","time":"11:49","by":"Wildlife volunteers"},"WTM_FAR051":{"lat":45.55375,"lon":25.0284,"setup":"10 May 2023","time":"13:31","by":"Wildlife volunteers"},"WTM_FAR053":{"lat":45.55389,"lon":25.05161,"setup":"4 May 2023","time":"12:01","by":"Zsolt Miholcea"},"WTM_FAR056":{"lat":45.55376,"lon":25.0901,"setup":"4 May 2023","time":"12:13","by":"Adrian Idor"},"WTM_FAR057":{"lat":45.55392,"lon":25.10266,"setup":"5 Apr 2023","time":"14:22","by":"Ruben Iosif"},"WTM_FAR060":{"lat":45.55376,"lon":25.14112,"setup":"3 Apr 2023","time":"13:43","by":"Zsolt Miholcea"},"WTM_FAR062":{"lat":45.5447,"lon":24.97454,"setup":"29 May 2023","time":"14:01","by":"Madalin Mocanu"},"WTM_FAR063":{"lat":45.54489,"lon":24.98758,"setup":"15 May 2023","time":"13:06","by":"Wildlife volunteers"},"WTM_FAR064":{"lat":45.54488,"lon":25.00068,"setup":"16 May 2023","time":"13:35","by":"Zsolt Miholcea"},"WTM_FAR066":{"lat":45.54489,"lon":25.02621,"setup":"5 May 2023","time":"10:11","by":"Wildlife volunteers"},"WTM_FAR067":{"lat":45.54473,"lon":25.03844,"setup":"5 May 2023","time":"10:02","by":"Adrian Idor"},"WTM_FAR068":{"lat":45.54471,"lon":25.05157,"setup":"10 May 2023","time":"10:38","by":"Wildlife volunteers"},"WTM_FAR069":{"lat":45.54495,"lon":25.06468,"setup":"9 May 2023","time":"13:56","by":"Wildlife volunteers"},"WTM_FAR070":{"lat":45.54465,"lon":25.07725,"setup":"9 May 2023","time":"14:42","by":"Wildlife volunteers"},"WTM_FAR072":{"lat":45.54494,"lon":25.10255,"setup":"4 May 2023","time":"11:54","by":"Wildlife volunteers"},"WTM_FAR074":{"lat":45.54473,"lon":25.12827,"setup":"3 Apr 2023","time":"13:43","by":"Ruben Iosif"},"WTM_FAR075":{"lat":45.54471,"lon":25.14122,"setup":"3 Apr 2023","time":"16:58","by":"Ruben Iosif"},"WTM_FAR078":{"lat":45.5358,"lon":24.97479,"setup":"24 May 2023","time":"14:34","by":"Wildlife volunteers"},"WTM_FAR081":{"lat":45.53586,"lon":25.01299,"setup":"5 May 2023","time":"11:29","by":"Adrian Idor"},"WTM_FAR082":{"lat":45.5358,"lon":25.02587,"setup":"5 May 2023","time":"11:56","by":"Wildlife volunteers"},"WTM_FAR084":{"lat":45.5358,"lon":25.05206,"setup":"9 May 2023","time":"14:28","by":"Zsolt Miholcea"},"WTM_FAR085":{"lat":45.5357,"lon":25.06431,"setup":"9 May 2023","time":"15:26","by":"Wildlife volunteers"},"WTM_FAR087":{"lat":45.5354,"lon":25.09007,"setup":"9 May 2023","time":"13:00","by":"Wildlife volunteers"},"WTM_FAR092":{"lat":45.53557,"lon":25.15392,"setup":"23 Apr 2023","time":"15:53","by":"Zsolt Miholcea"},"WTM_FAR093":{"lat":45.53565,"lon":25.16668,"setup":"5 May 2023","time":"13:56","by":"Zsolt Miholcea"},"WTM_FAR095":{"lat":45.52674,"lon":24.97454,"setup":"11 May 2023","time":"09:35","by":"Wildlife volunteers"},"WTM_FAR096":{"lat":45.52688,"lon":24.9875,"setup":"30 May 2023","time":"12:38","by":"Zsolt Miholcea"},"WTM_FAR098":{"lat":45.52703,"lon":25.013,"setup":"11 May 2023","time":"11:21","by":"Wildlife volunteers"},"WTM_FAR099":{"lat":45.52685,"lon":25.02591,"setup":"16 May 2023","time":"13:25","by":"Wildlife volunteers"},"WTM_FAR100":{"lat":45.52685,"lon":25.03897,"setup":"10 May 2023","time":"13:49","by":"Zsolt Miholcea"},"WTM_FAR104":{"lat":45.52679,"lon":25.08978,"setup":"3 May 2023","time":"13:09","by":"Wildlife volunteers"},"WTM_FAR108":{"lat":45.52681,"lon":25.1411,"setup":"4 Apr 2023","time":"13:03","by":"Ruben Iosif"},"WTM_FAR109":{"lat":45.5268,"lon":25.15368,"setup":"4 Apr 2023","time":"13:05","by":"Zsolt Miholcea"},"WTM_FAR111":{"lat":45.52663,"lon":25.17936,"setup":"5 May 2023","time":"15:05","by":"Zsolt Miholcea"},"WTM_FAR112":{"lat":45.51767,"lon":24.962,"setup":"17 May 2023","time":"12:43","by":"Wildlife volunteers"},"WTM_FAR113":{"lat":45.51782,"lon":24.97474,"setup":"17 May 2023","time":"10:44","by":"Wildlife volunteers"},"WTM_FAR115":{"lat":45.51789,"lon":25.00014,"setup":"11 May 2023","time":"09:41","by":"Wildlife volunteers"},"WTM_FAR123":{"lat":45.51768,"lon":25.10282,"setup":"28 Apr 2023","time":"19:05","by":"Wildlife volunteers"},"WTM_FAR124":{"lat":45.51772,"lon":25.11536,"setup":"28 Apr 2023","time":"19:01","by":"Wildlife volunteers"},"WTM_FAR125":{"lat":45.51781,"lon":25.12849,"setup":"2 May 2023","time":"13:35","by":"Wildlife volunteers"},"WTM_FAR126":{"lat":45.51789,"lon":25.14093,"setup":"2 May 2023","time":"11:45","by":"Wildlife volunteers"},"WTM_FAR129":{"lat":45.51759,"lon":25.17941,"setup":"5 Apr 2023","time":"13:19","by":"Zsolt Miholcea"},"WTM_FAR130":{"lat":45.51761,"lon":25.1922,"setup":"5 May 2023","time":"16:36","by":"Zsolt Miholcea"},"WTM_FAR131":{"lat":45.50887,"lon":24.94897,"setup":"23 May 2023","time":"13:52","by":"Wildlife volunteers"},"WTM_FAR132":{"lat":45.50874,"lon":24.96164,"setup":"29 May 2023","time":"14:14","by":"Zsolt Miholcea"},"WTM_FAR133":{"lat":45.50873,"lon":24.97465,"setup":"29 May 2023","time":"16:43","by":"Zsolt Miholcea"},"WTM_FAR142":{"lat":45.5089,"lon":25.09013,"setup":"27 Apr 2023","time":"18:37","by":"Wildlife volunteers"},"WTM_FAR143":{"lat":45.5088,"lon":25.10267,"setup":"15 May 2023","time":"11:36","by":"Wildlife volunteers"},"WTM_FAR147":{"lat":45.50867,"lon":25.1537,"setup":"20 Apr 2023","time":"12:09","by":"Adrian Idor"},"WTM_FAR148":{"lat":45.5088,"lon":25.16676,"setup":"5 Apr 2023","time":"16:52","by":"Zsolt Miholcea"},"WTM_FAR149":{"lat":45.50875,"lon":25.17953,"setup":"5 Apr 2023","time":"15:19","by":"Zsolt Miholcea"},"WTM_FAR159":{"lat":45.49951,"lon":25.08985,"setup":"30 May 2023","time":"10:28","by":"Madalin Mocanu"},"WTM_FAR160":{"lat":45.50004,"lon":25.10264,"setup":"16 May 2023","time":"11:04","by":"Wildlife volunteers"},"WTM_FAR162":{"lat":45.49976,"lon":25.12847,"setup":"19 Apr 2023","time":"13:32","by":"Wildlife volunteers"},"WTM_FAR166":{"lat":45.49977,"lon":25.17941,"setup":"30 May 2023","time":"12:28","by":"Madalin Mocanu"},"WTM_FAR171":{"lat":45.49102,"lon":25.08984,"setup":"27 Apr 2023","time":"14:57","by":"Wildlife volunteers"},"WTM_FAR172":{"lat":45.49091,"lon":25.1028,"setup":"2 May 2023","time":"11:29","by":"Wildlife volunteers"},"WTM_FAR173":{"lat":45.49076,"lon":25.11545,"setup":"2 May 2023","time":"12:58","by":"Wildlife volunteers"},"WTM_FAR174":{"lat":45.49091,"lon":25.12827,"setup":"19 Apr 2023","time":"10:05","by":"Wildlife volunteers"},"WTM_FAR176":{"lat":45.49062,"lon":25.15387,"setup":"6 Apr 2023","time":"12:10","by":"Zsolt Miholcea"},"WTM_FAR177":{"lat":45.49091,"lon":25.16677,"setup":"20 Apr 2023","time":"12:40","by":"Zsolt Miholcea"},"WTM_FAR178":{"lat":45.4907,"lon":25.1797,"setup":"20 Apr 2023","time":"11:09","by":"Zsolt Miholcea"},"WTM_FAR181":{"lat":45.48176,"lon":25.08985,"setup":"27 Apr 2023","time":"12:25","by":"Wildlife volunteers"},"WTM_FAR182":{"lat":45.48188,"lon":25.1026,"setup":"27 Apr 2023","time":"13:02","by":"Adrian Idor"},"WTM_FAR183":{"lat":45.48184,"lon":25.11539,"setup":"24 Apr 2023","time":"11:12","by":"Wildlife volunteers"},"WTM_FAR185":{"lat":45.48165,"lon":25.14105,"setup":"18 Apr 2023","time":"12:01","by":"Zsolt Miholcea"},"WTM_FAR186":{"lat":45.48168,"lon":25.15358,"setup":"6 Apr 2023","time":"11:53","by":"Ruben Iosif"},"WTM_FAR188":{"lat":45.4818,"lon":25.1794,"setup":"13 Apr 2023","time":"12:23","by":"Zsolt Miholcea"},"WTM_FAR191":{"lat":45.47269,"lon":25.11553,"setup":"27 Apr 2023","time":"10:49","by":"Adrian Idor"},"WTM_FAR193":{"lat":45.47276,"lon":25.14107,"setup":"18 Apr 2023","time":"13:21","by":"Zsolt Miholcea"},"WTM_FAR194":{"lat":45.47281,"lon":25.15375,"setup":"6 Apr 2023","time":"14:33","by":"Ruben Iosif"},"WTM_FAR195":{"lat":45.47272,"lon":25.16637,"setup":"13 Apr 2023","time":"14:50","by":"Zsolt Miholcea"},"WTM_FAR196":{"lat":45.47257,"lon":25.1794,"setup":"13 Apr 2023","time":"13:28","by":"Zsolt Miholcea"},"WTM_FAR197":{"lat":45.46379,"lon":25.08989,"setup":"28 Apr 2023","time":"14:35","by":"Zsolt Miholcea"},"WTM_FAR198":{"lat":45.46382,"lon":25.10267,"setup":"28 Apr 2023","time":"11:42","by":"Zsolt Miholcea"},"WTM_FAR200":{"lat":45.4638,"lon":25.12838,"setup":"24 Apr 2023","time":"10:28","by":"Adrian Idor"},"WTM_FAR201":{"lat":45.46368,"lon":25.14108,"setup":"12 Apr 2023","time":"13:35","by":"Zsolt Miholcea"},"WTM_FAR205":{"lat":45.45477,"lon":25.1028,"setup":"28 Apr 2023","time":"12:01","by":"Wildlife volunteers"},"WTM_FAR207":{"lat":45.45491,"lon":25.12826,"setup":"24 Apr 2023","time":"11:29","by":"Adrian Idor"},"WTM_FAR209":{"lat":45.45462,"lon":25.15404,"setup":"6 Apr 2023","time":"13:36","by":"Zsolt Miholcea"},"WTM_FAR211":{"lat":45.45473,"lon":25.1793,"setup":"18 Apr 2023","time":"12:17","by":"Wildlife volunteers"},"WTM_FAR212":{"lat":45.44584,"lon":25.10244,"setup":"24 Apr 2023","time":"13:56","by":"Adrian Idor"},"WTM_FAR215":{"lat":45.44558,"lon":25.14096,"setup":"26 Apr 2023","time":"11:47","by":"Adrian Idor"},"WTM_FAR216":{"lat":45.44579,"lon":25.15365,"setup":"13 Apr 2023","time":"11:10","by":"Madalin Mocanu"},"WTM_FAR218":{"lat":45.44559,"lon":25.17925,"setup":"18 Apr 2023","time":"13:58","by":"Wildlife volunteers"},"WTM_FAR220":{"lat":45.43682,"lon":25.11539,"setup":"24 Apr 2023","time":"13:59","by":"Wildlife volunteers"},"WTM_FAR222":{"lat":45.43659,"lon":25.14116,"setup":"26 Apr 2023","time":"11:39","by":"Wildlife volunteers"},"WTM_FAR224":{"lat":45.43672,"lon":25.16647,"setup":"13 Apr 2023","time":"13:49","by":"Madalin Mocanu"},"WTM_FAR228":{"lat":45.42773,"lon":25.12785,"setup":"28 Apr 2023","time":"12:17","by":"Adrian Idor"},"WTM_FAR230":{"lat":45.4277,"lon":25.15351,"setup":"26 Apr 2023","time":"13:13","by":"Adrian Idor"},"WTM_FAR233":{"lat":45.42763,"lon":25.19201,"setup":"12 Apr 2023","time":"11:07","by":"Zsolt Miholcea"},"WTM_FAR234":{"lat":45.4187,"lon":25.1154,"setup":"28 Apr 2023","time":"10:31","by":"Adrian Idor"},"WTM_FAR235":{"lat":45.41866,"lon":25.12822,"setup":"22 Apr 2023","time":"12:45","by":"Wildlife volunteers"},"WTM_FAR236":{"lat":45.41864,"lon":25.14096,"setup":"21 Apr 2023","time":"13:34","by":"Adrian Idor"},"WTM_FAR237":{"lat":45.41868,"lon":25.15377,"setup":"26 Apr 2023","time":"14:19","by":"Wildlife volunteers"},"WTM_FAR239":{"lat":45.41884,"lon":25.17912,"setup":"19 Apr 2023","time":"11:10","by":"Zsolt Miholcea"},"WTM_FAR241":{"lat":45.40986,"lon":25.11543,"setup":"28 Apr 2023","time":"13:40","by":"Wildlife volunteers"},"WTM_FAR242":{"lat":45.40976,"lon":25.12782,"setup":"21 Apr 2023","time":"14:12","by":"Zsolt Miholcea"},"WTM_FAR243":{"lat":45.40958,"lon":25.14085,"setup":"21 Apr 2023","time":"11:54","by":"Zsolt Miholcea"},"WTM_FAR245":{"lat":45.40956,"lon":25.16638,"setup":"19 Apr 2023","time":"14:07","by":"Zsolt Miholcea"},"WTM_FAR246":{"lat":45.40965,"lon":25.17933,"setup":"19 Apr 2023","time":"12:17","by":"Zsolt Miholcea"},"WTM_FAR249":{"lat":45.40082,"lon":25.12817,"setup":"21 Apr 2023","time":"10:56","by":"Adrian Idor"},"WTM_FAR250":{"lat":45.40085,"lon":25.14068,"setup":"21 Apr 2023","time":"12:04","by":"Adrian Idor"},"WTM_FAR255":{"lat":45.39183,"lon":25.11534,"setup":"20 Apr 2023","time":"11:33","by":"Wildlife volunteers"},"WTM_FAR256":{"lat":45.39191,"lon":25.128,"setup":"20 Apr 2023","time":"13:50","by":"Wildlife volunteers"},"WTM_FAR257":{"lat":45.39172,"lon":25.14063,"setup":"2 May 2023","time":"12:05","by":"Adrian Idor"},"WTM_FAR258":{"lat":45.39172,"lon":25.1537,"setup":"22 Apr 2023","time":"10:12","by":"Wildlife volunteers"},"WTM_FAR262":{"lat":45.38279,"lon":25.11521,"setup":"20 Apr 2023","time":"09:44","by":"Wildlife volunteers"},"WTM_FAR263":{"lat":45.38285,"lon":25.12785,"setup":"20 Apr 2023","time":"12:44","by":"Wildlife volunteers"}};
+var PROT = PROT_EMBED, PROT_SRC = "embedded field protocol",
+    MAPOBJ = null, MAPMARKERS = [], curMap = "All wildlife";
 function stMeta(stid) {
   const pr = PROT && PROT[stid];
   if (!pr) return { setup: "", lat: null, lon: null };
@@ -1415,8 +1425,8 @@ function renderMapPanel() {
     $("mapNote").textContent = "";
     return;
   }
-  $("protPick").hidden = true;
-  $("protStatus").textContent = Object.keys(PROT).length + " camera positions from the field protocol";
+  $("protPick").hidden = typeof XLSX === "undefined";
+  $("protStatus").textContent = Object.keys(PROT).length + " camera positions · " + PROT_SRC;
   if (typeof L === "undefined") {
     $("fig_M").innerHTML = '<p class="hint" style="padding:20px">The map library (Leaflet) failed to load; it needs an internet connection.</p>';
     return;
@@ -1442,7 +1452,8 @@ function parseProtocol(buf, label) {
       out[m[1]] = { lat, lon, setup: row[7], time: row[8], by: row[9] };
     }
     if (!Object.keys(out).length) { $("protStatus").textContent = "no camera coordinates found in " + label; return; }
-    PROT = out;
+    PROT = out; PROT_SRC = label;
+    if (MAPOBJ) { MAPOBJ.remove(); MAPOBJ = null; MAPMARKERS = []; }
     if (S.results) { buildMapData(); renderMapPanel(); }
   } catch (e) {
     $("protStatus").textContent = "could not read " + label;
@@ -1850,7 +1861,7 @@ $("scopeTog").addEventListener("click", (e) => {
   [...$("scopeTog").children].forEach((ch) => ch.classList.toggle("on", ch === b));
   $("scopeNote").textContent = SCOPE === "survey"
     ? "systematic survey only" : "includes files not in Camera Trap Monitoring/Collections";
-  if (S.loaded) generate();
+  invalidate();
 });
 $("mapSel").addEventListener("change", (e) => buildMap(e.target.value));
 $("clockSel").addEventListener("change", (e) => buildClock(e.target.value));

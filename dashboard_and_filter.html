@@ -249,11 +249,13 @@ tr.photorow td{background:var(--night2);white-space:normal}
         </div>
       </div>
       <div class="field">
-        <span class="lbl">Minimum sequence length (seconds)</span>
-        <input type="number" id="minlen" min="0" step="1" value="0" aria-label="Minimum sequence length in seconds">
-        <div class="sub">Elapsed time from the first to the last photograph in the
-        event; 0 keeps every event. (This is a viewing filter, unrelated to the
-        60-second grouping gap used when the archive was classified.)</div>
+        <span class="lbl">Sequence gap (seconds)</span>
+        <input type="number" id="seqgap" min="1" step="1" placeholder="as classified"
+               aria-label="Sequence gap in seconds">
+        <div class="sub">Photographs in the same folder within this many seconds of
+        the previous one form a single event. Blank keeps the grouping from
+        classification. Changing it regroups the whole archive on Generate,
+        which re-reads the file (takes about as long as loading did).</div>
       </div>
       <div class="field" id="scopebar">
         <span class="lbl">Scope</span>
@@ -493,11 +495,13 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
           labelled &lsquo;undefined&rsquo; instead of a species name. The companion tick box decides
           whether those undefined events stay in the results (shown in red in the table, and in
           the grey &lsquo;unidentified&rsquo; group in the charts) or are dropped entirely.</li>
-        <li><b>Minimum sequence length</b> - drops events shorter than this many seconds;
-          0 keeps everything. It is unrelated to the 60-second grouping gap used at
-          classification: that gap chains photos into events (an event can last far longer than
-          the gap, because a lingering animal keeps re-triggering the camera); this filter
-          merely hides short events from the results.</li>
+        <li><b>Sequence gap</b> - the rule that chains photographs into events: each photo
+          within this many seconds of the previous one (in the same folder) joins the same
+          event, so an event can last far longer than the gap when an animal lingers. Blank
+          keeps the grouping baked in at classification; entering a number regroups the whole
+          archive by re-reading the file, so Generate takes about as long as the original
+          load. The per-species &lsquo;min seconds&rsquo; boxes in the species table still let you
+          drop events shorter than a given length.</li>
         <li><b>Scope</b> - the official survey is the drive's <i>Camera Trap
           Monitoring/Collections</i> folder; &lsquo;All images&rsquo; adds everything else on the
           drive. Out-of-scope events are counted in &lsquo;Events filtered out&rsquo;, which is why
@@ -693,8 +697,27 @@ const S = {
   tMin: null, tMax: null, logs: null,
   map: new Map(),
   hasScores: false, rows: 0, results: null,
-  hasColl: false, srcName: "", src: null,
+  hasColl: false, srcName: "", src: null, loadedGap: null,
 };
+
+/* Streaming regrouper: replicates the engine's findSequences rule - photos
+   in the same folder chain while each is within `gap` seconds of the
+   previous one. Rows in the master are folder-contiguous and date-ordered
+   (the engine writes them that way), so one pass suffices. An undated photo
+   cannot chain and becomes its own event. */
+function makeGrouper(gap) {
+  let lastDir = null, lastT = NaN, count = 0;
+  return (fn, d) => {
+    const dir = fn.slice(0, fn.lastIndexOf("/"));
+    const t = d ? d.getTime() : NaN;
+    if (dir !== lastDir || !isFinite(t) || !isFinite(lastT) ||
+        t - lastT > gap * 1000 || t < lastT) {
+      count++;
+    }
+    lastDir = dir; lastT = t;
+    return gap + "s-" + count;
+  };
+}
 let SCOPE = "survey";
 
 /* Engine constants: image-level scores were softmaxed at T=1.10; the engine
@@ -718,7 +741,33 @@ function grow(need) {
 
 /* ============================ loading the CSV =========================== */
 async function loadFile(file) {
-  await loadFrom(file.stream().getReader(), file.size, file.name, { file });
+  await loadFrom(file.stream().getReader(), file.size, file.name, { file }, readGap());
+}
+
+/* Re-read the already-loaded source with a different grouping gap. */
+async function reloadForGap(gap) {
+  if (!S.src) return false;
+  let reader, total = 0, label = S.srcName;
+  try {
+    if (S.src.file) { reader = S.src.file.stream().getReader(); total = S.src.file.size; }
+    else {
+      const resp = await fetch(S.src.url);
+      if (!resp.ok || !resp.body) throw new Error("fetch failed");
+      reader = resp.body.getReader(); total = +(resp.headers.get("content-length") || 0);
+    }
+  } catch (e) {
+    $("actionstatus").textContent = "Could not re-read the source CSV to regroup.";
+    return false;
+  }
+  $("actionstatus").textContent = gap == null
+    ? "Restoring the grouping from classification (re-reading the file)…"
+    : "Regrouping at " + gap + " s (re-reading the file)…";
+  try {
+    await loadFrom(reader, total, label, S.src, gap);
+  } catch (e) {
+    return false;
+  }
+  return S.loaded;
 }
 
 /* When the page is served over HTTP from the out-dir (python3 -m http.server),
@@ -730,13 +779,16 @@ async function tryAutoLoad() {
     const resp = await fetch("deepfaune_master.csv");
     if (!resp.ok || !resp.body) return;
     const size = +(resp.headers.get("content-length") || 0);
-    await loadFrom(resp.body.getReader(), size, "deepfaune_master.csv (auto-loaded)", { url: "deepfaune_master.csv" });
+    await loadFrom(resp.body.getReader(), size, "deepfaune_master.csv (auto-loaded)", { url: "deepfaune_master.csv" }, readGap());
   } catch (e) { /* no master file next to the page - the picker still works */ }
 }
 
-async function loadFrom(reader, totalBytes, label, src) {
+async function loadFrom(reader, totalBytes, label, src, gap) {
+  const prevClasses = S.classes.join("|");
+  const grouper = gap != null ? makeGrouper(gap) : null;
   $("filemeta").hidden = false;
-  $("filemeta").textContent = label + (totalBytes ? " · " + humanBytes(totalBytes) : "");
+  $("filemeta").textContent = label + (totalBytes ? " · " + humanBytes(totalBytes) : "") +
+    (gap != null ? " · regrouped at " + gap + " s" : "");
   $("loadnote").hidden = true;
   $("loadprog").hidden = false;
   setBar("loadbar", 0);
@@ -744,7 +796,8 @@ async function loadFrom(reader, totalBytes, label, src) {
   Object.assign(S, { loaded: false, n: 0, cap: 0, id: [], station: [], wtm: [], firstFile: [], files: [],
     nImg: null, nAnimal: null, nHuman: null, nVehicle: null, nEmpty: null, flags: null,
     tMin: null, tMax: null, logs: null, map: new Map(), rows: 0, results: null,
-    hasColl: false, srcName: label.replace(" (auto-loaded)", ""), src: src || null });
+    hasColl: false, srcName: label.replace(" (auto-loaded)", ""), src: src || null,
+    loadedGap: gap != null ? gap : null });
 
   const decoder = new TextDecoder("utf-8");
   let remainder = "", read = 0, header = null, col = {}, scoreIdx = [], seqCol = -1;
@@ -775,8 +828,10 @@ async function loadFrom(reader, totalBytes, label, src) {
     const p = splitCsv(line);
     if (p.length < header.length - 2) return;
     const fn = p[col.filename] || "";
-    const key = seqCol >= 0 && p[seqCol] ? p[seqCol]
-      : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p[col.seqnum] || "");
+    const d0 = grouper ? parseExif(p[col.date]) : null;
+    const key = grouper ? grouper(fn, d0)
+      : (seqCol >= 0 && p[seqCol] ? p[seqCol]
+        : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p[col.seqnum] || ""));
     let i = S.map.get(key);
     if (i === undefined) {
       i = S.n++;
@@ -844,11 +899,14 @@ async function loadFrom(reader, totalBytes, label, src) {
   $("loadmsg").textContent = fmt(S.rows) + " images · " + fmt(S.n) + " events · " + S.K + " species columns";
   $("loadeta").textContent = "read in " + humanTime((performance.now() - t0) / 1000);
   S.loaded = true;
-  $("ft_src").textContent = S.srcName + " (" + fmt(S.rows) + " image records)";
+  $("ft_src").textContent = S.srcName + " (" + fmt(S.rows) + " image records)" +
+    (gap != null ? ", regrouped at " + gap + " s" : "");
   /* No Collections paths in this archive: the scope toggle has nothing to scope. */
   $("scopebar").hidden = !S.hasColl;
   if (!S.hasColl) SCOPE = "all";
-  buildSpeciesTable();
+  /* A regroup reload keeps the species table (and every tick and override)
+     when the classes are unchanged; only a different file rebuilds it. */
+  if (S.classes.join("|") !== prevClasses) buildSpeciesTable();
   enable("p-filter"); enable("actions");
   $("actionstatus").textContent = "Ready. Set your filters, then press Generate.";
   renderStatsPlaceholder();
@@ -903,9 +961,16 @@ function updateCandCount() {
   $("candcount").textContent = on + " of " + S.classes.length + " species";
 }
 
+/* The regrouping gap: null keeps the file's own sequence grouping. */
+function readGap() {
+  const v = $("seqgap").value.trim();
+  if (v === "") return null;
+  const n = Math.max(1, Math.round(+v));
+  return isFinite(n) ? n : null;
+}
 function readFilters() {
   const gThr = Math.min(1, Math.max(0, +$("thrNum").value || 0));
-  const gLen = Math.max(0, +$("minlen").value || 0);
+  const gLen = 0;   /* per-species min-seconds overrides only */
   const on = new Uint8Array(S.K).fill(0);
   const thr = new Float64Array(S.K).fill(gThr);
   const len = new Float64Array(S.K).fill(gLen);   /* seconds, not image count */
@@ -979,6 +1044,11 @@ const isoDay = (ms) => {
 
 async function generate() {
   if (!S.loaded) return;
+  const wantGap = readGap();
+  if (wantGap !== S.loadedGap && S.src) {
+    const okr = await reloadForGap(wantGap);
+    if (!okr) return;
+  }
   const F = readFilters();
   $("genprog").hidden = false;
   setBar("genbar", 0);
@@ -1904,6 +1974,7 @@ async function downloadImagesCsv() {
   let buf = "", remainder = "", read = 0, first = true;
   let header = null, col = {}, seqCol = -1, wrote = 0;
   const t0 = performance.now();
+  const grouper = S.loadedGap != null ? makeGrouper(S.loadedGap) : null;
   const handleLine = (line) => {
     if (first) {
       first = false;
@@ -1916,8 +1987,9 @@ async function downloadImagesCsv() {
     const p2 = splitCsv(line);
     if (p2.length < header.length - 2) return;
     const fn = p2[col.filename] || "";
-    const key = seqCol >= 0 && p2[seqCol] ? p2[seqCol]
-      : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p2[col.seqnum] || "");
+    const key = grouper ? grouper(fn, parseExif(p2[col.date]))
+      : (seqCol >= 0 && p2[seqCol] ? p2[seqCol]
+        : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p2[col.seqnum] || ""));
     const i = S.map.get(key);
     const r = i !== undefined ? kept[i] : undefined;
     if (!r) return;
@@ -2087,7 +2159,7 @@ $("thrNum").addEventListener("change", () => {
   $("thr").value = v;
   invalidate();
 });
-$("minlen").addEventListener("input", invalidate);
+$("seqgap").addEventListener("input", invalidate);
 ["inc-undefined", "inc-empty", "inc-human", "inc-vehicle"].forEach((id) =>
   $(id).addEventListener("change", invalidate));
 $("sp-all").addEventListener("click", () => setAllSpecies(true));

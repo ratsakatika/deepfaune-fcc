@@ -15,13 +15,6 @@ import pytest
 import dfrun
 
 
-@pytest.fixture(autouse=True)
-def _clear_updated_env(monkeypatch):
-    # The update path sets DFRUN_UPDATED in the real environment; make sure no
-    # test starts with it set.
-    monkeypatch.delenv("DFRUN_UPDATED", raising=False)
-
-
 def _touch(path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"x")
@@ -210,33 +203,32 @@ def _mock_git(monkeypatch, *, fetch, dirty, branch, ff, behind, pull_ok=True):
     monkeypatch.setattr(dfrun, "run_git", lambda repo, args, timeout=60: _Result())
 
 
-def test_self_update_applies_when_behind(monkeypatch, tmp_path):
+def test_self_update_applies_then_exits(monkeypatch, tmp_path, capsys):
+    # A successful update must EXIT so the user relaunches on the new code,
+    # never continue this process (old code in memory, new checkout on disk).
     _mock_git(monkeypatch, fetch=True, dirty=False, branch=dfrun.UPDATE_BRANCH, ff=True, behind=2)
-    execv_calls = []
-    monkeypatch.setattr(dfrun.os, "execv", lambda exe, argv: execv_calls.append((exe, argv)))
     args = dfrun.build_arg_parser().parse_args([])
-    result = dfrun.self_update_check(args, str(tmp_path), worker_is_running=False, prompt=lambda m: "y")
-    assert result is True            # it re-exec'd
-    assert execv_calls               # os.execv was called
+    with pytest.raises(SystemExit) as exc:
+        dfrun.self_update_check(args, str(tmp_path), worker_is_running=False, prompt=lambda m: "y")
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "Updated" in out and "run dfrun again" in out
 
 
 def test_self_update_refuses_when_dirty(monkeypatch, tmp_path):
     _mock_git(monkeypatch, fetch=True, dirty=True, branch=dfrun.UPDATE_BRANCH, ff=True, behind=2)
-    monkeypatch.setattr(dfrun.os, "execv", lambda *a: pytest.fail("must not update"))
     args = dfrun.build_arg_parser().parse_args([])
     assert dfrun.self_update_check(args, str(tmp_path), worker_is_running=False, prompt=lambda m: "y") is False
 
 
 def test_self_update_refuses_when_worker_running(monkeypatch, tmp_path):
     _mock_git(monkeypatch, fetch=True, dirty=False, branch=dfrun.UPDATE_BRANCH, ff=True, behind=2)
-    monkeypatch.setattr(dfrun.os, "execv", lambda *a: pytest.fail("must not update"))
     args = dfrun.build_arg_parser().parse_args([])
     assert dfrun.self_update_check(args, str(tmp_path), worker_is_running=True, prompt=lambda m: "y") is False
 
 
 def test_self_update_continues_when_unreachable(monkeypatch, tmp_path, capsys):
     _mock_git(monkeypatch, fetch=False, dirty=False, branch=dfrun.UPDATE_BRANCH, ff=True, behind=0)
-    monkeypatch.setattr(dfrun.os, "execv", lambda *a: pytest.fail("must not update"))
     args = dfrun.build_arg_parser().parse_args([])
     assert dfrun.self_update_check(args, str(tmp_path), worker_is_running=False, prompt=lambda m: "y") is False
     assert "remote unreachable" in capsys.readouterr().out

@@ -4,485 +4,429 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Detection Dashboard &amp; Filter</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-/* ---------- tokens: light is the base, dark redefines only values ---------- */
-:root {
-  color-scheme: light;
-  --ground:      #f3f5f3;
-  --surface:     #ffffff;
-  --surface-2:   #ecefec;
-  --line:        #dde3df;
-  --line-strong: #c3ccc6;
-  --ink:         #12171a;
-  --ink-2:       #4d5854;
-  --ink-3:       #6f7a76;
-  --accent:      #9c5a0d;
-  --accent-ink:  #ffffff;
-  --accent-soft: #f6ecdf;
-  --data:        #2a78d6;
-  --data-soft:   #cde2fb;
-  --good:        #0ca30c;
-  --warn:        #fab219;
-  --crit:        #d03b3b;
-  --shadow:      0 1px 2px rgba(18, 23, 26, .06), 0 8px 24px -16px rgba(18, 23, 26, .25);
-  --radius:      10px;
+/* ============ theme: identical to the survey dashboard (build_dashboard.py) ============ */
+:root{
+ --night:#0c1310; --night2:#0a100d; --bark:#141d18; --bark2:#18241e;
+ --line:#243029; --line2:#2d3b32;
+ --mist:#e8efe9; --muted:#8fa39a; --faint:#647269;
+ --sodium:#f0a839; --moon:#6fb6a6; --empty:#2c352f; --r:14px;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --ground:      #121614;
-    --surface:     #1a1f1d;
-    --surface-2:   #232926;
-    --line:        #2b322e;
-    --line-strong: #3c443f;
-    --ink:         #eef2ef;
-    --ink-2:       #a9b3ae;
-    --ink-3:       #869089;
-    --accent:      #e2941f;
-    --accent-ink:  #1a1206;
-    --accent-soft: #2c2415;
-    --data:        #3987e5;
-    --data-soft:   #17335a;
-    --good:        #0ca30c;
-    --warn:        #fab219;
-    --crit:        #e66767;
-    --shadow:      0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
-  }
-}
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --ground:      #121614;
-  --surface:     #1a1f1d;
-  --surface-2:   #232926;
-  --line:        #2b322e;
-  --line-strong: #3c443f;
-  --ink:         #eef2ef;
-  --ink-2:       #a9b3ae;
-  --ink-3:       #869089;
-  --accent:      #e2941f;
-  --accent-ink:  #1a1206;
-  --accent-soft: #2c2415;
-  --data:        #3987e5;
-  --data-soft:   #17335a;
-  --good:        #0ca30c;
-  --warn:        #fab219;
-  --crit:        #e66767;
-  --shadow:      0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
-}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{background:radial-gradient(1200px 600px at 80% -10%, #12201a 0%, transparent 60%),radial-gradient(900px 500px at -10% 10%, #101a15 0%, transparent 55%),var(--night);color:var(--mist);font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.5;letter-spacing:.005em;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:34px 22px 70px}
+h1,h2,h3{font-family:'Space Grotesk',sans-serif;font-weight:600;margin:0}
+.eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--sodium);margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.eyebrow .pdot{width:6px;height:6px;border-radius:50%;background:var(--sodium);box-shadow:0 0 10px 2px var(--sodium);animation:pulse 2.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+h1{font-size:clamp(30px,5vw,50px);line-height:1.03;letter-spacing:-.015em;margin-bottom:0}
+h1 .em{color:var(--sodium)}
+.thesis{color:var(--muted);max-width:62ch;margin-top:14px;font-size:15px}
+.thesis b{color:var(--mist);font-weight:600}
+.kpis{margin-top:26px;display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.kpi{background:var(--bark);border:1px solid var(--line);border-radius:var(--r);padding:17px 16px;position:relative;overflow:hidden}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--sodium);opacity:.55}
+.kpi.alt::before{background:var(--moon)}
+.kpi .v{font-family:'IBM Plex Mono',monospace;font-size:25px;font-weight:500;letter-spacing:-.02em;line-height:1}
+.kpi .v small{color:var(--muted);font-size:12px}
+.kpi .k{font-size:11px;color:var(--muted);margin-top:7px;letter-spacing:.03em}
+.section{margin-top:42px}
+.section-head{display:flex;align-items:baseline;gap:14px;margin-bottom:16px}
+.section-head .n{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--sodium);padding-top:2px}
+.section-head h2{font-size:21px;letter-spacing:-.01em}
+.section-head .hint{color:var(--faint);font-size:12.5px;margin-left:auto;max-width:50ch;text-align:right}
+.lead{color:var(--muted);max-width:82ch;font-size:13.5px;margin:-2px 0 15px}
+.lead b{color:var(--mist);font-weight:600}
+.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.controls .lbl{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--faint);letter-spacing:.04em}
+.controls .cap{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--muted)}
+.toggle{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+.scopebar{display:flex;align-items:center;gap:12px;margin:14px 0 22px;flex-wrap:wrap}
+.scopebar .lbl{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.09em}
+.scopebar .cap{color:var(--faint);font-size:12px}
+.toggle button{background:transparent;border:none;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;cursor:pointer;letter-spacing:.03em}
+.toggle button.on{background:var(--sodium);color:#1a1206;font-weight:600}
+.backbtn{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mist);background:var(--night2);border:1px solid var(--line2);border-radius:8px;padding:6px 12px;cursor:pointer;letter-spacing:.03em}
+.backbtn:hover{background:#1c2a23}
+select{background:var(--night2);color:var(--mist);border:1px solid var(--line2);border-radius:8px;padding:7px 28px 7px 11px;font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%238fa39a'/></svg>");background-repeat:no-repeat;background-position:right 10px center}
+select:focus-visible,button:focus-visible{outline:2px solid var(--moon);outline-offset:2px}
+.card{background:var(--bark);border:1px solid var(--line);border-radius:var(--r);padding:20px}
+.sbar{display:flex;align-items:center;gap:12px;padding:5px 0}
+.sbar .nm{width:128px;flex:none;font-size:12.5px;text-align:right;color:var(--mist);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbar .track{flex:1;height:18px;background:#0e1612;border-radius:5px;overflow:hidden;position:relative}
+.sbar .fill{height:100%;border-radius:5px;transition:width .6s cubic-bezier(.2,.7,.2,1)}
+.sbar .val{width:64px;flex:none;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--muted);text-align:right}
+.sbar:hover .fill{filter:brightness(1.18)}
+.stbar{display:flex;align-items:center;gap:10px;padding:4px 0;font-size:12px}
+.stbar .nm{width:120px;flex:none;text-align:right;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace;font-size:11px}
+.stbar .track{flex:1;height:16px;background:#0e1612;border-radius:4px;overflow:hidden;display:flex}
+.stbar .seg{height:100%}
+.stbar .val{width:46px;flex:none;text-align:right;font-family:'IBM Plex Mono',monospace;color:var(--muted)}
+.glegend{display:flex;gap:16px;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint);margin:0}
+.glegend span{display:inline-flex;align-items:center;gap:6px}
+.glegend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+.glegend .gl{cursor:pointer;transition:opacity .12s,color .12s}
+.glegend .gl:hover{color:var(--mist)}
+.dielring{display:block;margin:2px auto 0;width:100%;max-width:330px;height:auto}
+.ring-legend{display:flex;gap:18px;margin:0 0 6px;font-size:11px;color:var(--faint);justify-content:center}
+.ring-legend span{display:inline-flex;align-items:center;gap:6px}
+.ring-legend i{width:18px;height:3px;border-radius:2px;display:inline-block}
+.spoke{cursor:pointer;transition:stroke-width .08s}
+#fig_M{height:520px;padding:0;overflow:hidden;border:1px solid var(--line);border-radius:var(--r);background:var(--night2)}
+.leaflet-container{background:var(--night2);font-family:'Inter',sans-serif;font-size:12px}
+.leaflet-container a{color:var(--moon)}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#0a120e;color:var(--mist);border:1px solid var(--line2);box-shadow:0 6px 24px rgba(0,0,0,.5)}
+.leaflet-popup-content{margin:12px 14px;font-family:'Inter',sans-serif;font-size:12.5px;line-height:1.55}
+.leaflet-popup-content .pid{font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--sodium);font-size:13px;margin-bottom:5px}
+.leaflet-popup-content .stats{display:grid;grid-template-columns:1fr 1fr;column-gap:18px;row-gap:3px;margin:3px 0}
+.leaflet-popup-content .row{display:flex;justify-content:space-between;gap:10px;color:var(--muted);white-space:nowrap}
+.leaflet-popup-content .row b{font-family:'IBM Plex Mono',monospace;color:var(--mist);font-weight:500}
+.leaflet-popup-content .sps{margin-top:9px;color:var(--muted)}
+.leaflet-popup-content .pri{margin-top:9px;display:flex;gap:5px 6px;flex-wrap:wrap;align-items:center}
+.leaflet-popup-content .pri .plbl{color:var(--muted);margin-right:2px}
+.leaflet-popup-content .chip{font-family:'IBM Plex Mono',monospace;font-size:10.5px;padding:1px 6px;border-radius:5px;background:#15201a;white-space:nowrap}
+.leaflet-bar a{background:var(--bark);color:var(--mist);border-color:var(--line2)}
+.leaflet-bar a:hover{background:#1c2a23}
+.leaflet-control-layers{background:var(--bark);color:var(--mist);border:1px solid var(--line2);border-radius:8px}
+.leaflet-control-layers-expanded{padding:8px 10px 8px 8px}
+.leaflet-control-attribution{background:rgba(10,18,14,.78)!important;color:var(--faint)!important}
+#tip{position:fixed;pointer-events:none;background:#050907;border:1px solid var(--line2);border-radius:8px;padding:8px 13px;font-size:12px;opacity:0;transition:opacity .12s;z-index:70;max-width:420px;color:var(--mist)}
+#tip .t{font-family:'Space Grotesk',sans-serif;font-weight:600;margin-bottom:4px;white-space:nowrap}
+#tip .sub{color:var(--muted);font-size:11px;margin:-1px 0 4px;white-space:nowrap}
+#tip .sub:last-of-type{margin-bottom:6px}
+#tip .rs{display:flex;flex-wrap:wrap;gap:3px 16px;color:var(--muted)}
+#tip .rs span{white-space:nowrap}
+#tip .rs b{font-family:'IBM Plex Mono',monospace;color:var(--mist);font-weight:500}
+footer{margin-top:50px;border-top:1px solid var(--line);padding-top:22px;font-size:12.5px;color:var(--faint);max-width:90ch}
+footer h3{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+footer p{margin-bottom:9px}footer b{color:var(--muted);font-weight:600}
+.hint{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint)}
+html,body{max-width:100%;overflow-x:hidden}
 
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
-body {
-  margin: 0;
-  background: var(--ground);
-  color: var(--ink);
-  font: 400 15px/1.55 "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+/* ============ additions for the load / filter / table workflow ============ */
+button.primary{background:var(--sodium);color:#1a1206;border:none;border-radius:8px;padding:9px 18px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;cursor:pointer;letter-spacing:.03em}
+button.primary:hover{filter:brightness(1.08)}
+button.mini{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mist);background:var(--night2);border:1px solid var(--line2);border-radius:8px;padding:5px 11px;cursor:pointer;letter-spacing:.03em}
+button.mini:hover{background:#1c2a23}
+button[disabled]{opacity:.45;cursor:not-allowed;filter:none}
+.savebtns{margin-left:auto;display:inline-flex;gap:6px}
+.drop{border:1px dashed var(--line2);border-radius:var(--r);padding:24px;text-align:center;background:var(--bark)}
+.drop.over{border-color:var(--sodium);background:var(--bark2)}
+.filemeta{margin-top:10px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--muted)}
+.progress{margin-top:14px}
+.progress .track{height:6px;background:#0e1612;border-radius:99px;overflow:hidden}
+.progress .bar{height:100%;width:0%;background:var(--sodium);transition:width .2s}
+.progress .meta{display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint);margin-top:6px;gap:12px}
+.note{border-left:3px solid var(--sodium);background:var(--bark2);padding:10px 14px;border-radius:0 7px 7px 0;font-size:13px;color:var(--muted)}
+.note.err{border-left-color:#d03b3b}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:22px}
+.field .lbl{display:block;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--faint);letter-spacing:.04em;margin-bottom:8px}
+.field .sub{font-size:12px;color:var(--faint);margin-top:7px}
+input[type=number]{background:var(--night2);color:var(--mist);border:1px solid var(--line2);border-radius:8px;padding:7px 11px;font-family:'IBM Plex Mono',monospace;font-size:12px;width:100%}
+input[type=range]{accent-color:var(--sodium);width:100%}
+input[type=checkbox]{accent-color:var(--sodium)}
+.rangerow{display:flex;gap:12px;align-items:center}
+.rangerow input[type=number]{width:88px;flex:none}
+.checks label{display:inline-flex;gap:7px;align-items:center;font-size:12.5px;color:var(--muted);margin:0 14px 6px 0;cursor:pointer}
+details.disc{margin-top:20px}
+details.disc>summary{cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px}
+details.disc>summary::-webkit-details-marker{display:none}
+details.disc>summary::before{content:"\25B8";color:var(--sodium);transition:transform .15s;display:inline-block}
+details.disc[open]>summary::before{transform:rotate(90deg)}
+.sp-table-wrap{max-height:330px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:12px}
+.sp-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.sp-table th{position:sticky;top:0;background:var(--bark2);font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);padding:7px 10px;text-align:left;z-index:1}
+.sp-table td{padding:4px 10px;border-top:1px solid var(--line)}
+.sp-table td.num,.sp-table th.num{text-align:right}
+.sp-table .sp-thr,.sp-table .sp-len{width:88px;padding:4px 8px}
+tr.sp-off td{opacity:.42}
+.actionbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:26px;background:var(--bark);border:1px solid var(--line);border-radius:var(--r);padding:14px 18px}
+.actionbar .status{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--muted)}
+.actionbar .spacer{flex:1}
+.tablewrap{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.tablewrap table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:780px}
+.tablewrap th{position:sticky;top:0;background:var(--bark2);font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);padding:8px 10px;text-align:left;z-index:1}
+.tablewrap td{padding:5px 10px;border-top:1px solid var(--line);white-space:nowrap}
+.tablewrap th.num,.tablewrap td.num{text-align:right;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+.pill{padding:1px 8px;border-radius:6px;font-size:11.5px;font-family:'IBM Plex Mono',monospace;white-space:nowrap}
+.pill.animal{color:var(--sodium);background:rgba(240,168,57,.12)}
+.pill.below{color:#ff8477;background:rgba(208,59,59,.16)}
+.pill.other{color:var(--muted);background:#15201a}
+.tlegend{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint);margin:8px 0 6px}
+.tmuted{color:var(--faint)}
+.off{opacity:.5;pointer-events:none}
+@media (max-width:760px){
+ .kpis{grid-template-columns:repeat(2,1fr)}
+ .section-head .hint{display:none}
+ .sbar .nm{width:96px} .stbar .nm{width:86px}
+ #fig_M{height:400px}
+ .wrap{padding:26px 14px 60px}
+ .card{padding:14px}
 }
-.wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 96px; }
-
-/* ---------- masthead ---------- */
-.masthead {
-  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
-  padding: 28px 0 20px; border-bottom: 1px solid var(--line);
-  margin-bottom: 28px;
-}
-.masthead h1 {
-  margin: 0; font-size: 25px; font-weight: 600; letter-spacing: -.015em;
-  text-wrap: balance;
-}
-.masthead p { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 62ch; }
-.eyebrow {
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--ink-3);
-}
-.spacer { flex: 1 1 auto; }
-
-/* ---------- panels ---------- */
-.panel {
-  background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); box-shadow: var(--shadow);
-  margin-bottom: 20px;
-}
-.panel > header {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 14px 18px; border-bottom: 1px solid var(--line);
-}
-.panel > header h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.panel .body { padding: 18px; }
-.step {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: var(--surface-2); color: var(--ink-2);
-  font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 600;
-  flex: none;
-}
-.panel[data-state="done"] .step { background: var(--good); color: #fff; }
-
-/* ---------- controls ---------- */
-button {
-  font: inherit; font-weight: 500; cursor: pointer;
-  border-radius: 8px; border: 1px solid var(--line-strong);
-  background: var(--surface); color: var(--ink);
-  padding: 9px 16px; transition: background .12s, border-color .12s, opacity .12s;
-}
-button:hover:not(:disabled) { background: var(--surface-2); }
-button:disabled { opacity: .45; cursor: not-allowed; }
-button.primary {
-  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
-}
-button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
-:is(button, input, select, summary):focus-visible {
-  outline: 2px solid var(--data); outline-offset: 2px;
-}
-input[type="number"], input[type="text"], select {
-  font: inherit; color: var(--ink); background: var(--surface);
-  border: 1px solid var(--line-strong); border-radius: 7px; padding: 7px 9px;
-}
-input[type="number"] {
-  font-family: "IBM Plex Mono", monospace; font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-label { font-size: 14px; }
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field > .lbl { font-size: 13px; font-weight: 500; color: var(--ink-2); }
-.hint { font-size: 12.5px; color: var(--ink-3); margin: 4px 0 0; }
-.grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-.checks { display: flex; flex-wrap: wrap; gap: 8px 20px; }
-.checks label { display: inline-flex; align-items: center; gap: 7px; }
-.rangerow { display: flex; align-items: center; gap: 12px; }
-.rangerow input[type="range"] { flex: 1 1 auto; accent-color: var(--data); }
-.rangerow input[type="number"] { width: 6.5em; flex: none; text-align: right; }
-
-/* ---------- file drop ---------- */
-.drop {
-  border: 1.5px dashed var(--line-strong); border-radius: var(--radius);
-  padding: 24px; text-align: center; background: var(--surface-2);
-}
-.drop.over { border-color: var(--data); background: var(--data-soft); }
-.filemeta {
-  font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--ink-2);
-  margin-top: 10px;
-}
-
-/* ---------- progress ---------- */
-.progress { margin-top: 14px; }
-.progress[hidden] { display: none; }
-.track {
-  height: 7px; border-radius: 99px; background: var(--surface-2);
-  overflow: hidden; border: 1px solid var(--line);
-}
-.bar {
-  height: 100%; width: 0%; background: var(--data);
-  transition: width .15s linear;
-}
-.progress .meta {
-  display: flex; justify-content: space-between; gap: 12px;
-  font-family: "IBM Plex Mono", monospace; font-size: 12px;
-  color: var(--ink-2); margin-top: 7px; font-variant-numeric: tabular-nums;
-}
-
-/* ---------- action bar ---------- */
-.actionbar {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 16px 18px; background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 20px;
-}
-.actionbar .status { font-size: 13.5px; color: var(--ink-2); }
-
-/* ---------- stat tiles ---------- */
-.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); }
-.tile {
-  background: var(--surface-2); border: 1px solid var(--line);
-  border-radius: 9px; padding: 13px 15px;
-}
-.tile .k {
-  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .07em;
-  text-transform: uppercase; color: var(--ink-3);
-}
-.tile .v {
-  font-family: "IBM Plex Mono", monospace; font-size: 23px; font-weight: 600;
-  font-variant-numeric: tabular-nums; margin-top: 3px; letter-spacing: -.02em;
-}
-.tile .sub { font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
-
-/* ---------- species override table ---------- */
-.sp-table-wrap { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
-table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
-th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
-thead th {
-  position: sticky; top: 0; z-index: 1; background: var(--surface-2);
-  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .06em;
-  text-transform: uppercase; color: var(--ink-3); font-weight: 500;
-}
-tbody tr:last-child td { border-bottom: none; }
-td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
-.sp-table input[type="number"] { width: 88px; padding: 4px 7px; }
-.sp-off td:not(:first-child) { opacity: .4; }
-
-/* ---------- results table ---------- */
-.tablewrap {
-  overflow: auto; border: 1px solid var(--line); border-radius: 8px;
-  max-height: 540px;   /* the CSV holds every row; this stays scannable */
-}
-.tablewrap table { min-width: 780px; }
-.pill {
-  display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px;
-  font-weight: 500; background: var(--surface-2); border: 1px solid var(--line);
-}
-.pill.animal { background: var(--data-soft); border-color: transparent; color: var(--ink); }
-.pill.below { color: var(--crit); border-color: var(--crit); background: transparent; }
-.pill.other { color: var(--ink-3); }
-.legend {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  font-size: 12.5px; color: var(--ink-3); margin: 0 0 10px;
-}
-
-/* ---------- charts ---------- */
-.charts { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
-.chart h3 { margin: 0 0 2px; font-size: 14px; font-weight: 600; }
-.chart .cap { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-3); }
-.charthead { display: flex; align-items: flex-start; gap: 10px; }
-.charthead > div:first-child { flex: 1 1 auto; min-width: 0; }
-button.mini {
-  padding: 3px 9px; font-size: 12px; border-radius: 6px;
-  font-family: "IBM Plex Mono", monospace;
-}
-.savebtns { display: flex; gap: 6px; flex: none; }
-.exports { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
-.chart text { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--ink-2); }
-.chart .val { fill: var(--ink); font-weight: 500; }
-.chart .gridline { stroke: var(--line); stroke-width: 1; }
-.chart rect.mark { fill: var(--data); }
-.chart rect.hit { fill: transparent; cursor: pointer; }
-.chart g.row:hover rect.mark, .chart g.col:hover rect.mark { fill: var(--accent); }
-
-.tip {
-  position: fixed; pointer-events: none; z-index: 40; opacity: 0;
-  transition: opacity .1s; background: var(--surface); color: var(--ink);
-  border: 1px solid var(--line-strong); border-radius: 7px; padding: 7px 10px;
-  font-size: 12.5px; box-shadow: var(--shadow); max-width: 260px;
-}
-.tip .t-k { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-weight: 600; }
-
-details.disc > summary {
-  cursor: pointer; padding: 10px 0; font-weight: 500; font-size: 14px;
-  list-style: none; display: flex; align-items: center; gap: 8px;
-}
-details.disc > summary::-webkit-details-marker { display: none; }
-details.disc > summary::before {
-  content: "▸"; color: var(--ink-3); transition: transform .15s; display: inline-block;
-}
-details.disc[open] > summary::before { transform: rotate(90deg); }
-
-.note {
-  border-left: 3px solid var(--warn); background: var(--surface-2);
-  padding: 10px 14px; border-radius: 0 7px 7px 0; font-size: 13.5px; color: var(--ink-2);
-}
-.note.err { border-left-color: var(--crit); }
-.muted { color: var(--ink-3); }
-.mono { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
-[hidden] { display: none !important; }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
-<body>
-<div class="wrap">
+<body><div class="wrap">
 
-  <header class="masthead">
-    <div>
-      <div class="eyebrow">DeepFaune &middot; camera-trap archive</div>
-      <h1>Detection Dashboard &amp; Filter</h1>
-      <p>Explore, filter and export the archive from the raw model scores in the
-         master CSV: set thresholds, drop species that cannot occur, require a
-         minimum sequence length, then save the events, summaries and figures.</p>
-    </div>
-    <div class="spacer"></div>
-    <button id="theme" title="Switch light and dark">Theme</button>
-  </header>
-
-  <!-- 1. LOAD ------------------------------------------------------------- -->
-  <section class="panel" id="p-load">
-    <header><span class="step">1</span><h2>Load the master CSV</h2></header>
-    <div class="body">
-      <div class="drop" id="drop">
-        <button id="pick" class="primary">Choose a different CSV</button>
-        <input type="file" id="file" accept=".csv,text/csv" hidden>
-        <p class="hint" id="autonote"><span class="mono">deepfaune_master.csv</span> loads
-           automatically when this page is served from the same folder; otherwise choose
-           or drag a file here. Nothing is uploaded &mdash; it is read in your browser.</p>
-        <div class="filemeta" id="filemeta" hidden></div>
-      </div>
-      <div class="progress" id="loadprog" hidden>
-        <div class="track"><div class="bar" id="loadbar"></div></div>
-        <div class="meta"><span id="loadmsg">Reading…</span><span id="loadeta"></span></div>
-      </div>
-      <div id="loadnote" hidden></div>
-    </div>
-  </section>
-
-  <!-- 2. FILTERS ---------------------------------------------------------- -->
-  <section class="panel" id="p-filter" style="opacity:.5;pointer-events:none">
-    <header><span class="step">2</span><h2>Filters</h2>
-      <div class="spacer"></div>
-      <span class="eyebrow" id="candcount"></span>
-    </header>
-    <div class="body">
-      <div class="grid">
-        <div class="field">
-          <span class="lbl">Confidence threshold</span>
-          <div class="rangerow">
-            <input type="range" id="thr" min="0" max="1" step="0.01" value="0.8"
-                   aria-label="Confidence threshold slider">
-            <input type="number" id="thrNum" min="0" max="1" step="0.01" value="0.80"
-                   aria-label="Confidence threshold">
-          </div>
-          <p class="hint">Events scoring below this are labelled <em>undefined</em>.</p>
-        </div>
-        <div class="field">
-          <span class="lbl">Minimum sequence length (seconds)</span>
-          <input type="number" id="minlen" min="0" step="1" value="0">
-          <p class="hint">Elapsed time from the first to the last photograph in the
-             event. A single-photograph event is 0 seconds.</p>
-        </div>
-        <div class="field">
-          <span class="lbl">Include non-animal events</span>
-          <div class="checks">
-            <label><input type="checkbox" id="inc-undefined" checked> undefined</label>
-            <label><input type="checkbox" id="inc-empty"> empty</label>
-            <label><input type="checkbox" id="inc-human"> human</label>
-            <label><input type="checkbox" id="inc-vehicle"> vehicle</label>
-          </div>
-          <p class="hint">Unticked categories are left out of the export entirely.</p>
-        </div>
-      </div>
-
-      <details class="disc" id="spdisc" style="margin-top:6px">
-        <summary>Species: candidates and per-species overrides</summary>
-        <p class="hint" style="margin:0 0 10px">
-          Unticking a species removes it from the candidate set: those detections are
-          re-scored and fall to their next-best species. This is the only place
-          species exclusion belongs - the raw scores are recorded for every class,
-          so the decision is reversible here and permanent if made during
-          classification. Blank override cells use the global values above.
-        </p>
-        <div class="checks" style="margin-bottom:10px">
-          <button type="button" id="sp-all">All species</button>
-          <button type="button" id="sp-none">None</button>
-          <button type="button" id="sp-romania">Romania preset</button>
-        </div>
-        <div class="sp-table-wrap">
-          <table class="sp-table">
-            <thead><tr>
-              <th style="width:34px"></th><th>Species</th>
-              <th class="num" style="width:120px">Threshold</th>
-              <th class="num" style="width:120px">Min seconds</th>
-            </tr></thead>
-            <tbody id="sptbody"></tbody>
-          </table>
-        </div>
-      </details>
-    </div>
-  </section>
-
-  <!-- 3. ACTIONS ---------------------------------------------------------- -->
-  <div class="actionbar" id="actions" style="opacity:.5;pointer-events:none">
-    <button id="generate" class="primary">Generate</button>
-    <button id="download" disabled>Download filtered results as CSV</button>
-    <span class="status" id="actionstatus">Load a file to begin.</span>
-    <div class="spacer"></div>
-    <div class="progress" id="genprog" hidden style="min-width:230px;margin:0">
-      <div class="track"><div class="bar" id="genbar"></div></div>
-      <div class="meta"><span id="genmsg">Filtering…</span><span id="geneta"></span></div>
-    </div>
+<div class="eyebrow"><span class="pdot"></span>Wildlife camera-trap survey &middot; F&#259;g&#259;ra&#537; Mountains, Romania &middot; <span id="th_years">&mdash;</span></div>
+<h1><span id="th_stn">&mdash;</span> cameras across the<br><span class="em">F&#259;g&#259;ra&#537; Mountains</span>.</h1>
+<div class="scopebar" id="scopebar">
+  <span class="lbl">Show</span>
+  <div class="toggle" id="scopeTog">
+    <button data-v="survey" class="on">Official survey</button>
+    <button data-v="all">All images</button>
   </div>
+  <span class="cap" id="scopeNote">systematic survey only</span>
+</div>
+<p class="thesis">Spread across a stretch of the Southern Carpathians in Romania, the cameras recorded
+<b id="th_img">&mdash;</b> between <b id="th_d0">&mdash;</b> and <b id="th_d1">&mdash;</b>. Most frames were empty; the rest
+hold <b id="th_det">&mdash;</b> across <span id="th_animal">&mdash;</span> kinds of animal, from squirrels and roe deer
+to bear, wolf and bison. This dashboard shows what moved through these mountains, where, and when,
+under the thresholds and species filters you set below.</p>
+<div class="kpis" id="kpis"></div>
 
-  <!-- 4. RESULTS ---------------------------------------------------------- -->
-  <section class="panel" id="p-results" hidden>
-    <header><span class="step">3</span><h2>Results</h2>
-      <div class="spacer"></div>
-      <span class="eyebrow" id="resstamp"></span>
-    </header>
-    <div class="body">
-      <div class="tiles" id="tiles"></div>
+<!-- ================= 01 LOAD ================= -->
+<section class="section" id="p-load">
+  <div class="section-head"><span class="n">01</span><h2>Load the master CSV</h2></div>
+  <p class="lead">Everything on this page is computed in your browser from the raw per-class
+  scores in the master file. Nothing is uploaded.</p>
+  <div class="card">
+    <div class="drop" id="drop">
+      <button id="pick" class="primary">Choose a different CSV</button>
+      <input type="file" id="file" accept=".csv,text/csv" hidden>
+      <p class="hint" style="margin-top:12px" id="autonote">deepfaune_master.csv loads automatically when this page
+        is served from the same folder; otherwise choose or drag a file here.</p>
+      <div class="filemeta" id="filemeta" hidden></div>
+    </div>
+    <div class="progress" id="loadprog" hidden>
+      <div class="track"><div class="bar" id="loadbar"></div></div>
+      <div class="meta"><span id="loadmsg">Reading&hellip;</span><span id="loadeta"></span></div>
+    </div>
+    <div id="loadnote" hidden></div>
+  </div>
+</section>
 
-      <div class="exports">
-        <button class="mini" id="dl-summary">Save species summary (CSV)</button>
+<!-- ================= 02 FILTERS ================= -->
+<section class="section off" id="p-filter">
+  <div class="section-head"><span class="n">02</span><h2>Filters</h2>
+    <span class="hint" id="candcount"></span></div>
+  <p class="lead">Predictions are re-derived from the stored score distribution, so thresholds and
+  species exclusions apply retrospectively to the whole archive without reclassifying anything.</p>
+  <div class="card">
+    <div class="fgrid">
+      <div class="field">
+        <span class="lbl">Confidence threshold</span>
+        <div class="rangerow">
+          <input type="range" id="thr" min="0" max="1" step="0.01" value="0.8" aria-label="Confidence threshold slider">
+          <input type="number" id="thrNum" min="0" max="1" step="0.01" value="0.80" aria-label="Confidence threshold">
+        </div>
+        <div class="sub">Events scoring below this are labelled <i>undefined</i>.</div>
       </div>
-
-      <div class="charts" style="margin-top:18px">
-        <figure class="chart" style="margin:0">
-          <div class="charthead">
-            <div><h3>Events by species</h3>
-                 <p class="cap" id="cap-species">Top species after filtering.</p></div>
-            <div class="savebtns"><button class="mini" data-save="chart-species" data-fmt="png">PNG</button><button class="mini" data-save="chart-species" data-fmt="svg">SVG</button></div>
-          </div>
-          <div id="chart-species" data-title="Events by species"></div>
-        </figure>
-        <figure class="chart" style="margin:0">
-          <div class="charthead">
-            <div><h3>Events by month</h3>
-                 <p class="cap" id="cap-month">Detection events per calendar month.</p></div>
-            <div class="savebtns"><button class="mini" data-save="chart-month" data-fmt="png">PNG</button><button class="mini" data-save="chart-month" data-fmt="svg">SVG</button></div>
-          </div>
-          <div id="chart-month" data-title="Events by month"></div>
-        </figure>
-        <figure class="chart" style="margin:0">
-          <div class="charthead">
-            <div><h3>Events by hour of day</h3>
-                 <p class="cap" id="cap-hour">Diel activity across the filtered events.</p></div>
-            <div class="savebtns"><button class="mini" data-save="chart-hour" data-fmt="png">PNG</button><button class="mini" data-save="chart-hour" data-fmt="svg">SVG</button></div>
-          </div>
-          <div id="chart-hour" data-title="Events by hour of day"></div>
-        </figure>
-        <figure class="chart" style="margin:0">
-          <div class="charthead">
-            <div><h3>Busiest stations</h3>
-                 <p class="cap" id="cap-stations">Events per camera station.</p></div>
-            <div class="savebtns"><button class="mini" data-save="chart-stations" data-fmt="png">PNG</button><button class="mini" data-save="chart-stations" data-fmt="svg">SVG</button></div>
-          </div>
-          <div id="chart-stations" data-title="Busiest stations"></div>
-        </figure>
+      <div class="field">
+        <span class="lbl">Minimum sequence length (seconds)</span>
+        <input type="number" id="minlen" min="0" step="1" value="0" aria-label="Minimum sequence length in seconds">
+        <div class="sub">Elapsed time from the first to the last photograph in the
+        event. A single-photograph event is 0 seconds.</div>
       </div>
-
-      <h3 style="font-size:14px;margin:26px 0 8px">Events</h3>
-      <p class="hint" id="tablenote" style="margin:0 0 6px"></p>
-      <p class="legend" id="legend"></p>
-      <div class="tablewrap">
-        <table><thead><tr>
-          <th>Top 1</th><th class="num">Score</th><th class="num">Top 2</th>
-          <th class="num">Top 3</th><th class="num">Images</th>
-          <th class="num">Length</th><th>Station</th><th>Date</th>
-        </tr></thead><tbody id="resbody"></tbody></table>
+      <div class="field">
+        <span class="lbl">Include non-animal events</span>
+        <div class="checks">
+          <label><input type="checkbox" id="inc-undefined" checked> undefined</label>
+          <label><input type="checkbox" id="inc-empty"> empty</label>
+          <label><input type="checkbox" id="inc-human"> human</label>
+          <label><input type="checkbox" id="inc-vehicle"> vehicle</label>
+        </div>
+        <div class="sub">Unticked categories are left out of every panel and the export.</div>
       </div>
     </div>
-  </section>
+    <details class="disc" id="spdetails">
+      <summary>Species: candidates and per-species overrides</summary>
+      <p class="lead" style="margin:12px 0 10px">Untick a species to exclude it: its detections fall
+      to the next-best candidate, exactly as if it had been excluded during classification &mdash;
+      and the decision stays reversible here. Blank override cells use the global values above.</p>
+      <div class="checks" style="margin-bottom:10px">
+        <button type="button" class="mini" id="sp-all">All species</button>
+        <button type="button" class="mini" id="sp-none">None</button>
+        <button type="button" class="mini" id="sp-romania">Romania preset</button>
+      </div>
+      <div class="sp-table-wrap">
+        <table class="sp-table">
+          <thead><tr>
+            <th style="width:34px"></th><th>Species</th>
+            <th class="num" style="width:120px">Threshold</th>
+            <th class="num" style="width:120px">Min seconds</th>
+          </tr></thead>
+          <tbody id="sptbody"></tbody>
+        </table>
+      </div>
+    </details>
+  </div>
+</section>
 
-  <p class="hint" style="margin-top:26px">
-    Scores are re-derived from the per-class <span class="mono">score_*</span> columns,
-    so thresholds and species exclusions apply retrospectively to the whole archive
-    without reclassifying anything. Events are grouped by
-    <span class="mono">sequence_id</span>; if your CSV predates that column, the
-    folder path and <span class="mono">seqnum</span> are used instead. Sequence
-    length is the elapsed time across an event; the grouping itself was fixed by
-    the <span class="mono">maxlag</span> used when the archive was classified.
-  </p>
+<!-- ================= ACTIONS ================= -->
+<div class="actionbar off" id="actions">
+  <button id="generate" class="primary">Generate</button>
+  <button id="download" class="mini" disabled>Download filtered results as CSV</button>
+  <button id="dl-summary" class="mini" disabled>Save species summary (CSV)</button>
+  <span class="status" id="actionstatus">Load a file to begin.</span>
+  <div class="spacer"></div>
+  <div class="progress" id="genprog" hidden style="min-width:230px;margin:0">
+    <div class="track"><div class="bar" id="genbar"></div></div>
+    <div class="meta"><span id="genmsg">Filtering&hellip;</span><span id="geneta"></span></div>
+  </div>
 </div>
 
-<div class="tip" id="tip" role="status" aria-live="polite"></div>
+<div id="figs" hidden>
 
+<!-- ================= 03 CAMERA GRID ================= -->
+<section class="section" id="sec_map">
+  <div class="section-head"><span class="n">03</span><h2>The camera grid</h2></div>
+  <p class="lead" id="mapLead">The cameras at their real positions. Each circle is a camera; choose
+  &lsquo;All wildlife&rsquo;, &lsquo;All wildlife, humans and vehicles&rsquo; or a single species to size the
+  circles by how many detections each camera made, with empty cameras dimmed. Tap a camera for its
+  details. If the map background does not appear, pick a different style from the control at the top
+  right; the camera markers always work.</p>
+  <div class="controls">
+    <span class="lbl">Show</span><select id="mapSel"></select>
+    <span class="cap" id="protStatus"></span>
+    <span class="savebtns"><button class="mini" id="protPick" hidden>Load field protocol (.xlsx)</button></span>
+    <input type="file" id="protFile" accept=".xlsx" hidden>
+  </div>
+  <div class="card" id="fig_M"></div>
+  <div id="mapNote" class="hint" style="margin-top:12px"></div>
+</section>
+
+<!-- ================= 04 DAILY RHYTHM ================= -->
+<section class="section" id="sec_clock">
+  <div class="section-head"><span class="n">04</span><h2>Daily rhythm</h2></div>
+  <p class="lead">When animals are active, by hour of day. Each spoke is one hour and its length is
+  the number of detections in that hour; midnight is at the top, noon at the bottom, and the shaded
+  half is night (18:00&ndash;06:00). The centre shows the total for the current choice. Only records
+  carrying a usable time of day are counted here, so these totals are smaller than the figures at
+  the top of the page. Choose &lsquo;All wildlife&rsquo; or a single species; each ring is scaled to its
+  own busiest hour.</p>
+  <div class="controls">
+    <span class="lbl">Show</span><select id="clockSel"></select><span id="clockN" class="cap"></span>
+    <span class="savebtns"><button class="mini" data-save="ring" data-fmt="png">PNG</button><button class="mini" data-save="ring" data-fmt="svg">SVG</button></span>
+  </div>
+  <div class="card" id="fig_A"></div>
+</section>
+
+<!-- ================= 05 THROUGH THE SEASONS ================= -->
+<section class="section" id="sec_season">
+  <div class="section-head"><span class="n">05</span><h2>Through the seasons</h2></div>
+  <p class="lead">Detection events stacked by ecological group. <b>Timeline</b> shows them week by
+  week across the survey window; <b>By month</b> folds the years onto a single calendar (month of
+  year) so the seasonal pattern stands out. Effort is uneven (cameras ran on different dates), so
+  totals reflect both activity and how many cameras were running. Click a group in the legend to
+  break it down by species.</p>
+  <div class="controls">
+    <div class="toggle" id="seasonTog"><button data-m="T" class="on">Timeline</button><button data-m="S">By month</button></div>
+    <button id="back_D" class="backbtn" style="display:none">&larr;&nbsp;back to groups</button>
+    <span class="savebtns"><button class="mini" data-save="season" data-fmt="png">PNG</button></span>
+  </div>
+  <div class="card" id="fig_D"></div>
+</section>
+
+<!-- ================= 06 WHAT THE CAMERAS SAW ================= -->
+<section class="section" id="sec_species">
+  <div class="section-head"><span class="n">06</span><h2>What the cameras saw</h2></div>
+  <p class="lead">Every species the cameras recorded, as detection events (one per photographic
+  sequence) or as photographs. All taxa are shown, ordered by frequency and coloured by ecological
+  group (matching the season and station panels); domestic animals are muted. Counts are
+  sequence-level, so they differ from a frame-by-frame tally (see notes).</p>
+  <div class="controls">
+    <div class="toggle" id="sbToggle"><button data-m="events" class="on">Events</button><button data-m="images">Photos</button></div>
+    <div class="glegend" id="sbLegend"></div>
+    <span class="savebtns"><button class="mini" data-save="sbars" data-fmt="png">PNG</button></span>
+  </div>
+  <div class="card" id="speciesBars"></div>
+  <div class="hint" style="margin-top:12px">Domestic animals (cattle, dogs, sheep, goats, cats, horses)
+  are shown muted. Click a group in the legend to hide or show it; hover a bar for events, photos and
+  mean confidence.</div>
+</section>
+
+<!-- ================= 07 BUSIEST CAMERAS ================= -->
+<section class="section" id="sec_stations">
+  <div class="section-head"><span class="n">07</span><h2>Busiest cameras</h2></div>
+  <p class="lead" id="stLead">Every camera station, ordered by total detection events, each bar split
+  by ecological group. Bar length is the number of detection events (one per photographic sequence);
+  click a group in the legend to hide or show it, and hover a bar for the station total.</p>
+  <div class="controls">
+    <div class="glegend" id="stLegend"></div>
+    <span class="savebtns"><button class="mini" data-save="stbars" data-fmt="png">PNG</button></span>
+  </div>
+  <div class="card" id="stationBars"></div>
+</section>
+
+<!-- ================= 08 EVENTS ================= -->
+<section class="section" id="sec_events">
+  <div class="section-head"><span class="n">08</span><h2>Events</h2>
+    <span class="hint" id="resstamp"></span></div>
+  <p class="lead" id="tablenote"></p>
+  <p class="tlegend" id="legend"></p>
+  <div class="tablewrap">
+    <table><thead><tr>
+      <th>Top 1</th><th class="num">Score</th><th class="num">Top 2</th>
+      <th class="num">Top 3</th><th class="num">Images</th>
+      <th class="num">Length</th><th>Station</th><th>Date</th>
+    </tr></thead><tbody id="resbody"></tbody></table>
+  </div>
+</section>
+
+</div><!-- /figs -->
+
+<footer>
+<h3>Notes &amp; method</h3>
+<p><b>Unit of analysis.</b> Consecutive frames sharing a sequence number within a folder form one
+photographic sequence (burst); each sequence counts as one detection event, since burst frames are
+not independent records of separate visits. Events are grouped by <i>sequence_id</i>; if the CSV
+predates that column, the folder path and seqnum are used instead.</p>
+<p><b>Filtering.</b> Every panel reflects the current filters: predictions are re-derived from the
+per-class <i>score_*</i> columns, so thresholds and species exclusions apply retrospectively and
+reversibly to the whole archive. An event scoring below the threshold is labelled
+&lsquo;undefined&rsquo; and appears in the unidentified group.</p>
+<p><b>Scope.</b> The default view is the official systematic survey: images in the drive&rsquo;s
+<i>Camera Trap Monitoring/Collections</i> folder. The <i>All images</i> toggle additionally counts
+off-protocol frames recorded at the same cells. Files in the drive&rsquo;s recycle bin are excluded
+from both views.</p>
+<p><b>Caveats.</b> Labels are automated predictions and are not field-verified; the
+&lsquo;unidentified&rsquo; group holds below-threshold events and clusters in daylight, consistent with
+empty or vegetation triggers. The seasonal panel is not effort-corrected. Night bands are nominal,
+not computed from local sunrise/sunset. <span id="clockerr"></span> Drilldowns and the clock for
+sparse groups rest on few events and are descriptive only.</p>
+<p id="placeNote" hidden><b>Place.</b> The study area is the F&#259;g&#259;ra&#537; Mountains (Southern
+Carpathians, Romania); the study-area code FAR denotes F&#259;g&#259;ra&#537;. The cameras lie around
+<span id="pl_ll"></span>, with coordinates and setup dates taken from the field protocol. The survey
+is a fixed grid re-deployed across years: every camera is placed by matching grid number and
+ignoring the year suffix.</p>
+<p style="color:#5E6B59;margin-top:14px">Source: <span id="ft_src">deepfaune_master.csv</span>
+&middot; computed live in your browser from the raw model scores &middot; charts built with Plotly and
+Leaflet from public CDNs; everything except the seasonal chart and the map background works offline.</p>
+</footer>
+
+</div><!-- /wrap -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 "use strict";
 
 /* ============================ small utilities ============================ */
 const $ = (id) => document.getElementById(id);
-const fmt = (n) => n.toLocaleString("en-GB");
-const pct = (a, b) => (b ? (100 * a / b).toFixed(1) + "%" : "0%");
+const fmt = (n) => Number(n).toLocaleString("en-GB");
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const cap1 = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const pad = (n) => String(n).padStart(2, "0");
+function isNarrow() { return window.innerWidth <= 640; }
+const MSHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmtDay = (d) => d.getDate() + " " + MSHORT[d.getMonth()] + " " + d.getFullYear();
+const fmtMonY = (d) => ["January","February","March","April","May","June","July","August",
+  "September","October","November","December"][d.getMonth()] + " " + d.getFullYear();
 
 function humanBytes(b) {
   const u = ["B", "KB", "MB", "GB"];
@@ -496,8 +440,55 @@ function humanTime(sec) {
   const m = Math.floor(sec / 60), s = Math.round(sec % 60);
   return m + "m " + String(s).padStart(2, "0") + "s";
 }
+function fmtSecs(s) {
+  if (s < 60) return Math.round(s) + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m " + String(Math.round(s % 60)).padStart(2, "0") + "s";
+  return (s / 3600).toFixed(1) + "h";
+}
 
-/* Parse one CSV line. Fast path when the line holds no quotes. */
+/* ================= palette and taxonomy (from the survey dashboard) ================= */
+const GCOL = {"ungulates":"#C77D3A","large carnivores":"#B5482B","mesocarnivores":"#D9A441",
+  "small mammals":"#8A9740","birds":"#4FA39C","people & livestock":"#8E97A6","unidentified":"#5E6B59"};
+const GORDER = ["ungulates","small mammals","mesocarnivores","large carnivores","birds","people & livestock","unidentified"];
+const WILD_G = ["ungulates","small mammals","mesocarnivores","large carnivores","birds"];
+const GUILD = {"wild boar":"ungulates","red deer":"ungulates","roe deer":"ungulates","bison":"ungulates",
+ "moose":"ungulates","chamois":"ungulates","ibex":"ungulates","fallow deer":"ungulates","reindeer":"ungulates",
+ "mouflon":"ungulates",
+ "bear":"large carnivores","wolf":"large carnivores","lynx":"large carnivores","golden jackal":"large carnivores",
+ "fox":"mesocarnivores","mustelid":"mesocarnivores","raccoon dog":"mesocarnivores","cat":"mesocarnivores",
+ "raccoon":"mesocarnivores","otter":"mesocarnivores","badger":"mesocarnivores","genet":"mesocarnivores",
+ "wolverine":"mesocarnivores",
+ "squirrel":"small mammals","lagomorph":"small mammals","micromammal":"small mammals","hedgehog":"small mammals",
+ "porcupine":"small mammals","marmot":"small mammals","beaver":"small mammals","muskrat":"small mammals",
+ "nutria":"small mammals",
+ "bird":"birds","bird passerine":"birds","bird galliform":"birds","bird corvid":"birds","bird raptor":"birds",
+ "bird columbiform":"birds","bird otherbird":"birds","bird undefined":"birds","bird piciform":"birds","bird anseriform":"birds",
+ "human":"people & livestock","vehicle":"people & livestock","dog":"people & livestock",
+ "cow":"people & livestock","goat":"people & livestock","equid":"people & livestock","sheep":"people & livestock",
+ "undefined":"unidentified"};
+const guildOf = (p) => GUILD[p] || "unidentified";
+const GIDX = {}; GORDER.forEach((g, i) => { GIDX[g] = i; });
+const SPCOL = {
+ "bear":"#c77b4e","wolf":"#9fb0bd","lynx":"#f4c542","wild boar":"#b98a52",
+ "golden jackal":"#d99a5b","red deer":"#9aa861","roe deer":"#b3bd7e","fallow deer":"#8f9a55",
+ "reindeer":"#7e8a52","moose":"#6f7a48","chamois":"#7fa38c","ibex":"#8f9e76","bison":"#a07a4e",
+ "squirrel":"#cf9244","fox":"#d2773a","mustelid":"#86a08c","badger":"#9aa0a6",
+ "micromammal":"#5f7a6b","lagomorph":"#84957f","hedgehog":"#7a8a72","genet":"#b89a6a",
+ "raccoon":"#8a8f96","raccoon dog":"#7f868c","goat":"#7d8a86",
+ "bird passerine":"#6fb6a6","bird corvid":"#4f8f84","bird galliform":"#82c0b0",
+ "bird raptor":"#5aa392","bird columbiform":"#9ccabe","bird otherbird":"#6aa99b",
+ "bird undefined":"#5e9488","bird piciform":"#73b3a4","bird anseriform":"#88c3b6","bird":"#6fb6a6",
+ "cow":"#6f7d79","sheep":"#79847f","dog":"#828d88","cat":"#8a938e","equid":"#74807b",
+ "porcupine":"#9a8f70","marmot":"#b0a35e","otter":"#6f8f88","human":"#8e97a6","vehicle":"#7a8580"};
+const colourFor = (s) => SPCOL[s] || "#5c7065";
+const DOMESTIC = new Set(["cow","sheep","dog","cat","equid","goat"]);
+const MLAB = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MINEV = 8;
+const ALLCOL = "#C2A24A", MAP_ALLCOL = "#6fb6a6";
+const WHV_KEY = "All wildlife, humans and vehicles";
+const SB_EXCL = new Set(["human","vehicle","undefined","empty"]);
+
+/* =============================== CSV parsing ============================ */
 function splitCsv(line) {
   if (line.indexOf('"') === -1) return line.split(",");
   const out = [];
@@ -525,42 +516,43 @@ function parseExif(s) {
   const d = new Date(s.slice(0, 4) + "-" + s.slice(5, 7) + "-" + s.slice(8, 10) + "T" + s.slice(11, 19));
   return isNaN(d) ? null : d;
 }
-/* Sequence length: elapsed seconds from the first to the last photograph.
-   The engine chains photos into a sequence while each is within maxlag of the
-   previous one, so an event's span is not bounded by maxlag - it is this
-   elapsed time. Undated events count as 0. */
-function seqSeconds(i) {
-  return isFinite(S.tMin[i]) && isFinite(S.tMax[i]) ? (S.tMax[i] - S.tMin[i]) / 1000 : 0;
-}
 /* Cameras with a dead clock stamp 1970 (or another junk year); those dates
-   are wrong, not missing, so time charts skip them rather than plot them. */
+   are wrong, not missing, so time panels skip them rather than plot them. */
 function plausibleDate(t) {
   if (!isFinite(t)) return false;
   const y = new Date(t).getFullYear();
   return y >= 2000 && y <= new Date().getFullYear() + 1;
 }
+/* Sequence length: elapsed seconds from the first to the last photograph. */
+function seqSeconds(i) {
+  return isFinite(S.tMin[i]) && isFinite(S.tMax[i]) ? (S.tMax[i] - S.tMin[i]) / 1000 : 0;
+}
 function stationOf(path) {
   const parts = path.split("/").filter(Boolean);
   return parts.length >= 3 ? parts.slice(-3, -1).join("/") : (parts[0] || "(unknown)");
 }
+const WTM_RE = /(WTM_FAR\d+)/;
 
 /* ============================== app state =============================== */
 const S = {
   loaded: false, classes: [], K: 0,
   n: 0, cap: 0,
-  id: [], station: [], firstFile: [],
+  id: [], station: [], wtm: [], firstFile: [],
   nImg: null, nAnimal: null, nHuman: null, nVehicle: null, nEmpty: null,
+  flags: null,               /* bit 1: in Collections; bit 2: recycle bin */
   tMin: null, tMax: null, logs: null,
   map: new Map(),
   hasScores: false, rows: 0, results: null,
+  hasColl: false, srcName: "",
 };
+let SCOPE = "survey";
 
 /* Engine constants: image-level scores were softmaxed at T=1.10; the engine
    averages sequence logits at T=1.04 (1.10 for a single-image sequence).
    Averaging log-scores recovers the mean logit up to a per-class-invariant
    constant, so rescaling by 1.10/T reproduces the sequence softmax exactly. */
 const T_IMAGE = 1.10, T_SEQ = 1.04;
-const LOG_FLOOR = Math.log(5e-5);   // scores are stored to 4dp; 0.0000 floors here
+const LOG_FLOOR = Math.log(5e-5);   /* scores are stored to 4dp; 0.0000 floors here */
 
 function grow(need) {
   if (need <= S.cap) return;
@@ -568,7 +560,7 @@ function grow(need) {
   const copy = (old, Type) => { const a = new Type(cap); if (old) a.set(old); return a; };
   S.nImg = copy(S.nImg, Int32Array); S.nAnimal = copy(S.nAnimal, Int32Array);
   S.nHuman = copy(S.nHuman, Int32Array); S.nVehicle = copy(S.nVehicle, Int32Array);
-  S.nEmpty = copy(S.nEmpty, Int32Array);
+  S.nEmpty = copy(S.nEmpty, Int32Array); S.flags = copy(S.flags, Uint8Array);
   S.tMin = copy(S.tMin, Float64Array); S.tMax = copy(S.tMax, Float64Array);
   const lg = new Float32Array(cap * S.K); if (S.logs) lg.set(S.logs); S.logs = lg;
   S.cap = cap;
@@ -599,9 +591,10 @@ async function loadFrom(reader, totalBytes, label) {
   $("loadprog").hidden = false;
   setBar("loadbar", 0);
 
-  Object.assign(S, { loaded: false, n: 0, cap: 0, id: [], station: [], firstFile: [],
-    nImg: null, nAnimal: null, nHuman: null, nVehicle: null, nEmpty: null,
-    tMin: null, tMax: null, logs: null, map: new Map(), rows: 0, results: null });
+  Object.assign(S, { loaded: false, n: 0, cap: 0, id: [], station: [], wtm: [], firstFile: [],
+    nImg: null, nAnimal: null, nHuman: null, nVehicle: null, nEmpty: null, flags: null,
+    tMin: null, tMax: null, logs: null, map: new Map(), rows: 0, results: null,
+    hasColl: false, srcName: label.replace(" (auto-loaded)", "") });
 
   const decoder = new TextDecoder("utf-8");
   let remainder = "", read = 0, header = null, col = {}, scoreIdx = [], seqCol = -1;
@@ -621,7 +614,7 @@ async function loadFrom(reader, totalBytes, label) {
     S.hasScores = S.K > 0;
     seqCol = col.sequence_id != null ? col.sequence_id : -1;
     if (!S.hasScores) {
-      note("loadnote", "err", "This CSV has no per-class <span class='mono'>score_*</span> columns, " +
+      note("loadnote", "err", "This CSV has no per-class <span class='hint'>score_*</span> columns, " +
         "so predictions cannot be re-derived. Re-export it with dfrun --outputs from a v1.1 or later run.");
       throw new Error("no score columns");
     }
@@ -639,8 +632,14 @@ async function loadFrom(reader, totalBytes, label) {
       i = S.n++;
       grow(S.n);
       S.map.set(key, i);
-      S.id[i] = key; S.station[i] = stationOf(fn); S.firstFile[i] = fn;
+      const m = fn.match(WTM_RE);
+      S.id[i] = key; S.station[i] = stationOf(fn); S.wtm[i] = m ? m[1] : "";
+      S.firstFile[i] = fn;
       S.tMin[i] = Infinity; S.tMax[i] = -Infinity;
+      let fl = 0;
+      if (fn.indexOf("Camera Trap Monitoring/Collections") !== -1) { fl |= 1; S.hasColl = true; }
+      if (fn.indexOf("$RECYCLE.BIN") !== -1) fl |= 2;
+      S.flags[i] = fl;
     }
     S.rows++;
     S.nImg[i]++;
@@ -694,11 +693,15 @@ async function loadFrom(reader, totalBytes, label) {
   $("loadmsg").textContent = fmt(S.rows) + " images · " + fmt(S.n) + " events · " + S.K + " species columns";
   $("loadeta").textContent = "read in " + humanTime((performance.now() - t0) / 1000);
   S.loaded = true;
-  $("p-load").dataset.state = "done";
+  $("ft_src").textContent = S.srcName + " (" + fmt(S.rows) + " image records)";
+  /* No Collections paths in this archive: the scope toggle has nothing to scope. */
+  $("scopebar").hidden = !S.hasColl;
+  if (!S.hasColl) SCOPE = "all";
   buildSpeciesTable();
   enable("p-filter"); enable("actions");
   $("actionstatus").textContent = "Ready. Set your filters, then press Generate.";
   invalidate();
+  generate();   /* first render with the default filters, like the original dashboard */
 }
 
 function setBar(id, p) { $(id).style.width = Math.max(0, Math.min(100, p)) + "%"; }
@@ -709,7 +712,7 @@ function note(id, kind, html) {
   el.style.marginTop = "14px";
   el.innerHTML = html;
 }
-function enable(id) { const el = $(id); el.style.opacity = ""; el.style.pointerEvents = ""; }
+function enable(id) { $(id).classList.remove("off"); }
 
 /* ========================= species override table ======================= */
 const ROMANIA_ABSENT = ["genet", "ibex", "porcupine", "reindeer", "wolverine"];
@@ -753,7 +756,7 @@ function readFilters() {
   const gLen = Math.max(0, +$("minlen").value || 0);
   const on = new Uint8Array(S.K).fill(0);
   const thr = new Float64Array(S.K).fill(gThr);
-  const len = new Float64Array(S.K).fill(gLen);   // seconds, not image count
+  const len = new Float64Array(S.K).fill(gLen);   /* seconds, not image count */
   document.querySelectorAll(".sp-on").forEach((cb) => { if (cb.checked) on[+cb.dataset.j] = 1; });
   document.querySelectorAll(".sp-thr").forEach((el) => { if (el.value !== "") thr[+el.dataset.j] = +el.value; });
   document.querySelectorAll(".sp-len").forEach((el) => { if (el.value !== "") len[+el.dataset.j] = Math.max(0, +el.value || 0); });
@@ -805,20 +808,39 @@ function classify(i, F) {
   };
 }
 
+/* Monday 00:00 of the week containing t. */
+function weekStartMs(d) {
+  const w = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+  return w.getTime();
+}
+const isoDay = (ms) => {
+  const d = new Date(ms);
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+};
+
 async function generate() {
+  if (!S.loaded) return;
   const F = readFilters();
   $("genprog").hidden = false;
   setBar("genbar", 0);
   const t0 = performance.now();
   const out = [];
-  const bySpecies = new Map(), byMonth = new Map(), byStation = new Map();
-  const imgBySpecies = new Map(), byHour = new Int32Array(24);
-  let images = 0, dropped = 0, badDates = 0;
+  const A = {
+    bySpecies: new Map(), imgBySpecies: new Map(), scoreSum: new Map(),
+    stations: new Map(),
+    clock: new Map(), clockWild: new Int32Array(24), clockWhv: new Int32Array(24),
+    weekly: new Map(), weeklySp: new Map(), monthly: new Map(), monthlySp: new Map(),
+    wkMin: Infinity, wkMax: -Infinity, d0: Infinity, d1: -Infinity,
+    images: 0, nonEmpty: 0, wildN: 0, whvN: 0, badDates: 0,
+  };
+  let dropped = 0;
 
   const CHUNK = 20000;
   for (let start = 0; start < S.n; start += CHUNK) {
     const end = Math.min(S.n, start + CHUNK);
     for (let i = start; i < end; i++) {
+      if (S.flags[i] & 2) { dropped++; continue; }                 /* recycle bin: neither scope */
+      if (SCOPE === "survey" && S.hasColl && !(S.flags[i] & 1)) { dropped++; continue; }
       const r = classify(i, F);
       if (r.kind === "empty" && !F.incEmpty) { dropped++; continue; }
       if (r.kind === "human" && !F.incHuman) { dropped++; continue; }
@@ -827,37 +849,82 @@ async function generate() {
       const need = r.cls != null && r.kind === "animal" ? F.len[r.cls] : F.gLen;
       if (need > 0 && seqSeconds(i) < need) { dropped++; continue; }
 
-      out.push(i);
-      out.push(r);
-      images += S.nImg[i];
-      bySpecies.set(r.label, (bySpecies.get(r.label) || 0) + 1);
-      imgBySpecies.set(r.label, (imgBySpecies.get(r.label) || 0) + S.nImg[i]);
-      byStation.set(S.station[i], (byStation.get(S.station[i]) || 0) + 1);
-      if (plausibleDate(S.tMin[i])) {
-        const d = new Date(S.tMin[i]);
-        const k = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
-        byMonth.set(k, (byMonth.get(k) || 0) + 1);
-        byHour[d.getHours()]++;
-      } else badDates++;
+      out.push(i); out.push(r);
+      A.images += S.nImg[i];
+      const label = r.label;
+      A.bySpecies.set(label, (A.bySpecies.get(label) || 0) + 1);
+      A.imgBySpecies.set(label, (A.imgBySpecies.get(label) || 0) + S.nImg[i]);
+      const datedMin = plausibleDate(S.tMin[i]);
+      if (datedMin) {
+        if (S.tMin[i] < A.d0) A.d0 = S.tMin[i];
+        if (plausibleDate(S.tMax[i]) && S.tMax[i] > A.d1) A.d1 = S.tMax[i];
+      }
+
+      const stid = S.wtm[i] || S.station[i] || "(unknown)";
+      let st = A.stations.get(stid);
+      if (!st) { st = { segs: new Int32Array(GORDER.length), tot: 0, sp: new Map(),
+                        seqs: 0, dtMax: -Infinity, scoreSum: 0, scoreN: 0 }; A.stations.set(stid, st); }
+      st.seqs++;
+      if (datedMin && S.tMax[i] > st.dtMax) st.dtMax = S.tMax[i];
+
+      if (r.kind === "empty") continue;   /* empty events count as sequences only */
+      A.nonEmpty++;
+      const g = guildOf(label);
+      const isWild = WILD_G.indexOf(g) !== -1;
+      const isWhv = isWild || label === "human" || label === "vehicle";
+      if (isWild) A.wildN++;
+      if (isWhv) A.whvN++;
+      st.segs[GIDX[g]]++; st.tot++;
+      st.sp.set(label, (st.sp.get(label) || 0) + 1);
+      st.scoreSum += r.score; st.scoreN++;
+      A.scoreSum.set(label, (A.scoreSum.get(label) || 0) + r.score);
+
+      if (!datedMin) { A.badDates++; continue; }
+      const d = new Date(S.tMin[i]);
+      let hr = A.clock.get(label);
+      if (!hr) { hr = new Int32Array(24); A.clock.set(label, hr); }
+      hr[d.getHours()]++;
+      if (isWild) A.clockWild[d.getHours()]++;
+      if (isWhv) A.clockWhv[d.getHours()]++;
+      const wk = weekStartMs(d);
+      if (wk < A.wkMin) A.wkMin = wk;
+      if (wk > A.wkMax) A.wkMax = wk;
+      let wg = A.weekly.get(g);
+      if (!wg) { wg = new Map(); A.weekly.set(g, wg); }
+      wg.set(wk, (wg.get(wk) || 0) + 1);
+      let wsg = A.weeklySp.get(g);
+      if (!wsg) { wsg = new Map(); A.weeklySp.set(g, wsg); }
+      let wsp = wsg.get(label);
+      if (!wsp) { wsp = new Map(); wsg.set(label, wsp); }
+      wsp.set(wk, (wsp.get(wk) || 0) + 1);
+      let mg = A.monthly.get(g);
+      if (!mg) { mg = new Int32Array(12); A.monthly.set(g, mg); }
+      mg[d.getMonth()]++;
+      let msg = A.monthlySp.get(g);
+      if (!msg) { msg = new Map(); A.monthlySp.set(g, msg); }
+      let msp = msg.get(label);
+      if (!msp) { msp = new Int32Array(12); msg.set(label, msp); }
+      msp[d.getMonth()]++;
     }
     const frac = end / S.n;
     setBar("genbar", frac * 100);
     const rate = end / ((performance.now() - t0) / 1000);
-    $("genmsg").textContent = fmt(Math.round(end / 2 * 2)) + " of " + fmt(S.n) + " events";
+    $("genmsg").textContent = fmt(end) + " of " + fmt(S.n) + " events";
     $("geneta").textContent = frac < 0.99 ? humanTime((S.n - end) / rate) + " left" : "";
     await new Promise((r) => requestAnimationFrame(r));
   }
 
   const events = out.length / 2;
-  S.results = { pairs: out, events, images, dropped, badDates,
-    bySpecies, imgBySpecies, byMonth, byHour, byStation, F };
+  S.results = Object.assign({ pairs: out, events, dropped, F }, A);
   setBar("genbar", 100);
   $("genmsg").textContent = fmt(events) + " events kept";
   $("geneta").textContent = "in " + humanTime((performance.now() - t0) / 1000);
-  renderResults();
+  buildDerived();
+  renderAll();
   $("download").disabled = events === 0;
+  $("dl-summary").disabled = events === 0;
   $("actionstatus").textContent = events
-    ? "Generated. Download is ready."
+    ? "Generated. Downloads are ready."
     : "No events matched these filters — try relaxing the threshold.";
   $("resstamp").textContent = "threshold " + (+$("thrNum").value).toFixed(2) +
     " · " + document.querySelectorAll(".sp-on:checked").length + " species";
@@ -868,47 +935,527 @@ function invalidate() {
   if (!S.loaded) return;
   S.results = null;
   $("download").disabled = true;
+  $("dl-summary").disabled = true;
   $("genprog").hidden = true;
   $("actionstatus").textContent = "Filters changed — press Generate to update.";
 }
 
-/* ============================== rendering =============================== */
-function renderResults() {
+/* ===================== derived structures for the panels ================= */
+var SPECIES = [], STATIONS_BARS = [], CLOCK = {}, CLOCK_ORDER = [], CLOCKOPTS = [];
+var SF = null, MAP_STATIONS = [], MAP_MAXTOT = 1, MAP_SPMAX = {}, MAP_ORDER = [], MAPOPTS = [], MAP_BOUNDS = null;
+var N_MAP = 0;
+
+function areaFig(x, names, series, colmap, metaguild, hoverTpl, ytitle) {
+  const GRIDC = "#1c2620", DIM = "#8fa39a";
+  const data = names.map((nm) => {
+    const tr = {
+      x, y: series[nm], mode: "lines", name: cap1(nm), stackgroup: "one",
+      line: { width: 0.8, color: colmap[nm], shape: "spline", smoothing: 0.7 },
+      fillcolor: colmap[nm],
+      hovertemplate: hoverTpl.replace("{name}", cap1(nm)) + "<extra></extra>",
+    };
+    if (metaguild) tr.meta = { guild: nm };
+    return tr;
+  });
+  const layout = {
+    height: 380, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: "'IBM Plex Mono', monospace", color: DIM, size: 11 },
+    xaxis: { title: null, gridcolor: GRIDC, zeroline: false, linecolor: GRIDC, tickfont: { color: DIM } },
+    yaxis: { title: { text: ytitle }, gridcolor: GRIDC, zeroline: false, linecolor: GRIDC, tickfont: { color: DIM } },
+    legend: { orientation: "h", yanchor: "bottom", y: 1.03, x: 0, title: null, font: { size: 10.5 }, bgcolor: "rgba(0,0,0,0)" },
+    hovermode: "x unified",
+    hoverlabel: { bgcolor: "#141d18", bordercolor: "#243029", font: { family: "Inter, sans-serif", color: "#e8efe9", size: 12 } },
+    margin: { l: 54, r: 20, t: 46, b: 34 },
+  };
+  return { data, layout };
+}
+
+function buildDerived() {
   const R = S.results;
-  $("p-results").hidden = false;
+  /* --- species bars --- */
+  SPECIES = [];
+  for (const [p, ev] of R.bySpecies) {
+    if (SB_EXCL.has(p)) continue;
+    const sc = R.scoreSum.get(p);
+    SPECIES.push({ species: p, g: guildOf(p), events: ev, images: R.imgBySpecies.get(p) || 0,
+      mean_score: sc != null ? Math.round((sc / ev) * 1000) / 1000 : null, dom: DOMESTIC.has(p) });
+  }
+  SPECIES.sort((a, b) => b.events - a.events);
 
-  const species = [...R.bySpecies.entries()].sort((a, b) => b[1] - a[1]);
-  const animals = species.filter(([k]) => !["empty", "human", "vehicle", "undefined"].includes(k));
-  const animalEvents = animals.reduce((s, [, v]) => s + v, 0);
+  /* --- station bars --- */
+  STATIONS_BARS = [];
+  for (const [stid, st] of R.stations) {
+    if (!st.tot) continue;
+    STATIONS_BARS.push(Object.assign(
+      { id: stid.replace("WTM_", ""), stid, total: st.tot, segs: [...st.segs] }, stMeta(stid)));
+  }
+  STATIONS_BARS.sort((a, b) => b.total - a.total);
+  $("stLead").innerHTML = "Every camera station, ordered by total detection events, each bar split " +
+    "by ecological group. All " + STATIONS_BARS.length + " stations with detections are shown. Bar length " +
+    "is the number of detection events (one per photographic sequence); click a group in the legend to " +
+    "hide or show it, and hover a bar for the station total.";
 
-  $("tiles").innerHTML = [
-    tile("Events kept", fmt(R.events), pct(R.events, S.n) + " of " + fmt(S.n) + " total"),
-    tile("Images covered", fmt(R.images), pct(R.images, S.rows) + " of the archive"),
-    tile("Animal events", fmt(animalEvents), animals.length + " species present"),
-    tile("Filtered out", fmt(R.dropped), "below threshold, length or excluded"),
-  ].join("");
+  /* --- daily-rhythm ring --- */
+  const ringSpecies = [...R.bySpecies.keys()]
+    .filter((s) => s !== "empty" && (R.bySpecies.get(s) || 0) >= MINEV).sort();
+  CLOCK_ORDER = ["All wildlife", WHV_KEY].concat(ringSpecies);
+  CLOCK = {};
+  for (const opt of CLOCK_ORDER) {
+    if (opt === "All wildlife") CLOCK[opt] = { color: ALLCOL, hr: [...R.clockWild] };
+    else if (opt === WHV_KEY) CLOCK[opt] = { color: ALLCOL, hr: [...R.clockWhv] };
+    else CLOCK[opt] = { color: GCOL[guildOf(opt)], hr: [...(R.clock.get(opt) || new Int32Array(24))] };
+  }
+  const clab = (o) => {
+    if (o === "All wildlife") return "All wildlife (" + fmt(R.wildN) + ")";
+    if (o === WHV_KEY) return WHV_KEY + " (" + fmt(R.whvN) + ")";
+    return cap1(o) + " (" + fmt(R.bySpecies.get(o) || 0) + ")";
+  };
+  CLOCKOPTS = CLOCK_ORDER.map((o) => [o, clab(o)]);
 
-  barChart("chart-species", animals.slice(0, 12).map(([k, v]) => ({ label: k, value: v })), "events");
-  $("cap-species").textContent = animals.length > 12
-    ? "Top 12 of " + animals.length + " species, by number of events."
-    : "All species present, by number of events.";
+  /* --- seasons: weekly timeline + month-of-year, guild overview + drilldown --- */
+  const gcols = GORDER.filter((g) => R.weekly.has(g) || R.monthly.has(g));
+  const weeks = [];
+  if (isFinite(R.wkMin)) {
+    for (let w = R.wkMin; w <= R.wkMax; w = weekStartMs(new Date(w + 8.5 * 86400 * 1000))) weeks.push(w);
+  }
+  const weekX = weeks.map(isoDay);
+  const weekRow = (m) => weeks.map((w) => (m && m.get(w)) || 0);
+  const gc = {}; gcols.forEach((g) => { gc[g] = GCOL[g]; });
+  const wSeries = {}; gcols.forEach((g) => { wSeries[g] = weekRow(R.weekly.get(g)); });
+  const mSeries = {}; gcols.forEach((g) => { mSeries[g] = [...(R.monthly.get(g) || new Int32Array(12))]; });
+  const HOV_W = "week of %{x|%d %b %Y}<br>%{y} {name} events";
+  const HOV_M = "%{x}<br>%{y} {name} events";
+  SF = { T: { ov: areaFig(weekX, gcols, wSeries, gc, true, HOV_W, "detection events / week"), dr: {} },
+         S: { ov: areaFig(MLAB, gcols, mSeries, gc, true, HOV_M, "detection events / month"), dr: {} } };
+  for (const g of gcols) {
+    const wsg = R.weeklySp.get(g), msg = R.monthlySp.get(g);
+    const totals = new Map();
+    if (msg) for (const [sp, arr] of msg) totals.set(sp, arr.reduce((a, b) => a + b, 0));
+    if (wsg) for (const [sp, m] of wsg) { if (!totals.has(sp)) totals.set(sp, [...m.values()].reduce((a, b) => a + b, 0)); }
+    const sps = [...totals.keys()].sort((a, b) => totals.get(b) - totals.get(a));
+    if (!sps.length) continue;
+    const scmap = {}; sps.forEach((s) => { scmap[s] = colourFor(s); });
+    const wS = {}; sps.forEach((s) => { wS[s] = weekRow(wsg && wsg.get(s)); });
+    const mS = {}; sps.forEach((s) => { mS[s] = [...((msg && msg.get(s)) || new Int32Array(12))]; });
+    SF.T.dr[g] = areaFig(weekX, sps, wS, scmap, false, HOV_W, "detection events / week");
+    SF.S.dr[g] = areaFig(MLAB, sps, mS, scmap, false, HOV_M, "detection events / month");
+  }
 
-  const months = [...R.byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  colChart("chart-month", months.map(([k, v]) => ({ label: k, value: v })));
-  $("cap-month").textContent = (months.length
-    ? months.length + " months, " + months[0][0] + " to " + months[months.length - 1][0] + "."
-    : "No plausibly dated events.") +
-    (R.badDates ? " " + fmt(R.badDates) + (R.badDates === 1 ? " event" : " events") + " with an implausible or missing date (for example 1970, a dead camera clock) " + (R.badDates === 1 ? "is" : "are") + " not plotted." : "");
+  /* --- camera-grid map --- */
+  buildMapData();
+}
 
-  colChart("chart-hour", [...R.byHour].map((v, h) => ({ label: String(h).padStart(2, "0"), value: v })));
-  $("cap-hour").textContent = "Start hour of each plausibly dated event, camera local time.";
+/* ============================ header + KPIs ============================= */
+function renderScalars() {
+  const R = S.results;
+  const stn = R.stations.size;
+  const d0 = isFinite(R.d0) ? new Date(R.d0) : null, d1 = isFinite(R.d1) ? new Date(R.d1) : null;
+  const years = d0 && d1 ? (d0.getFullYear() === d1.getFullYear()
+    ? String(d0.getFullYear()) : d0.getFullYear() + "–" + d1.getFullYear()) : "—";
+  const nAnimalTypes = SPECIES.length;
+  $("th_stn").textContent = stn;
+  $("th_years").textContent = years;
+  $("th_img").textContent = fmt(R.images) + " photographs";
+  $("th_d0").textContent = d0 ? fmtMonY(d0) : "—";
+  $("th_d1").textContent = d1 ? fmtMonY(d1) : "—";
+  $("th_det").textContent = fmt(R.nonEmpty) + " animal and human detections";
+  $("th_animal").textContent = nAnimalTypes;
+  const KPI = [
+    [fmt(R.images), "Images in kept events", false],
+    [fmt(R.events), "Photo sequences", true],
+    [fmt(R.nonEmpty), "Animal &amp; human detections", false],
+    [String(stn), "Camera stations", true],
+    [String(nAnimalTypes), "Animal types", false],
+  ];
+  $("kpis").innerHTML = KPI.map((k) =>
+    '<div class="kpi' + (k[2] ? " alt" : "") + '"><div class="v">' + k[0] +
+    '</div><div class="k">' + k[1] + "</div></div>").join("");
+  $("clockerr").textContent = R.badDates
+    ? fmt(R.badDates) + (R.badDates === 1 ? " record carries" : " records carry") +
+      " an unset-clock (1970/epoch) or out-of-range timestamp; these are excluded from the " +
+      "time-based panels but still counted in the station and map totals."
+    : "";
+}
 
-  const stations = [...R.byStation.entries()].sort((a, b) => b[1] - a[1]);
-  barChart("chart-stations", stations.slice(0, 10).map(([k, v]) => ({ label: k, value: v })), "events");
-  $("cap-stations").textContent = stations.length > 10
-    ? "Top 10 of " + stations.length + " stations, by number of events."
-    : "All " + stations.length + " stations, by number of events.";
+/* shared tooltip */
+var tipEl = null;
+function tipNode() { if (!tipEl) { tipEl = document.createElement("div"); tipEl.id = "tip"; document.body.appendChild(tipEl); } return tipEl; }
+function showTip(html, e) {
+  const t = tipNode(); t.innerHTML = html; t.style.opacity = 1;
+  let x = e.clientX + 14, y = e.clientY + 16;
+  if (x + 360 > window.innerWidth) x = e.clientX - 360;
+  t.style.left = x + "px"; t.style.top = y + "px";
+}
+function hideTip() { if (tipEl) tipEl.style.opacity = 0; }
 
+/* ----- species bars: "what the cameras saw" (all taxa, no prioritisation) ----- */
+var sbHidden = {}, stHidden = {};
+var SB_GROUPS = [], ST_GROUPS = [];
+function recomputeGroups() {
+  SB_GROUPS = GORDER.filter((g) => SPECIES.some((d) => d.g === g));
+  ST_GROUPS = GORDER.filter((g) => STATIONS_BARS.some((s) => s.segs[GIDX[g]] > 0));
+}
+function renderGLegend(hostId, groups, hidden, kind) {
+  const host = $(hostId); if (!host) return;
+  host.innerHTML = groups.map((g) =>
+    '<span class="gl" data-g="' + g + '" data-k="' + kind + '" style="opacity:' + (hidden[g] ? 0.32 : 1) +
+    '"><i style="background:' + GCOL[g] + '"></i>' + cap1(g) + "</span>").join("");
+  host.querySelectorAll(".gl").forEach((el) =>
+    el.addEventListener("click", () => toggleGroup(el.getAttribute("data-k"), el.getAttribute("data-g"))));
+}
+function toggleGroup(kind, g) {
+  if (kind === "sb") { sbHidden[g] = !sbHidden[g]; renderSpecies(); renderGLegend("sbLegend", SB_GROUPS, sbHidden, "sb"); }
+  else { stHidden[g] = !stHidden[g]; renderStations(); renderGLegend("stLegend", ST_GROUPS, stHidden, "st"); }
+}
+var sbMetric = "events";
+function renderSpecies() {
+  const host = $("speciesBars"); if (!host) return;
+  const list = SPECIES.filter((d) => !sbHidden[d.g]).sort((a, b) => b[sbMetric] - a[sbMetric]);
+  if (!list.length) { host.innerHTML = '<p class="hint">Nothing to show.</p>'; return; }
+  const mx = Math.max(...list.map((d) => d[sbMetric]), 1);
+  host.innerHTML = list.map((d) => {
+    const col = GCOL[d.g] || "#5c7065", w = Math.max(1.4, d[sbMetric] / mx * 100), nm = cap1(d.species);
+    return '<div class="sbar" data-s="' + d.species + '"><div class="nm" title="' + nm + '">' + nm + "</div>" +
+      '<div class="track"><div class="fill" style="width:' + w + "%;background:" + col + ";opacity:" + (d.dom ? 0.5 : 1) + '"></div></div>' +
+      '<div class="val">' + fmt(d[sbMetric]) + "</div></div>";
+  }).join("");
+  host.querySelectorAll(".sbar").forEach((el) => {
+    const d = SPECIES.find((x) => x.species === el.getAttribute("data-s")); if (!d) return;
+    const nm = cap1(d.species);
+    el.addEventListener("mousemove", (e) => showTip('<div class="t">' + nm + " (" + cap1(d.g) + ")" +
+      (d.dom ? " · domestic" : "") + "</div>" +
+      '<div class="rs"><span>Events <b>' + fmt(d.events) + "</b></span><span>Photos <b>" + fmt(d.images) + "</b></span>" +
+      (d.mean_score != null ? "<span>Mean conf <b>" + d.mean_score + "</b></span>" : "") + "</div>", e));
+    el.addEventListener("mouseleave", hideTip);
+  });
+}
+$("sbToggle").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b || !b.dataset.m) return;
+  sbMetric = b.dataset.m;
+  [...$("sbToggle").children].forEach((ch) => ch.classList.toggle("on", ch === b));
+  renderSpecies();
+});
+
+/* ----- station bars: "busiest cameras" (all stations, stacked by group) ----- */
+function renderStations() {
+  const host = $("stationBars"); if (!host) return;
+  const vis = (s) => { let t = 0; for (let g = 0; g < GORDER.length; g++) { if (!stHidden[GORDER[g]]) t += s.segs[g]; } return t; };
+  const list = STATIONS_BARS.slice().sort((a, b) => vis(b) - vis(a));
+  if (!list.length) { host.innerHTML = '<p class="hint">Nothing to show.</p>'; return; }
+  const mx = Math.max(...list.map(vis), 1);
+  host.innerHTML = list.map((s) => {
+    let segs = "";
+    for (let g = 0; g < GORDER.length; g++) {
+      const v = s.segs[g];
+      if (v > 0 && !stHidden[GORDER[g]]) segs += '<div class="seg" style="width:' + (v / mx * 100) + "%;background:" + GCOL[GORDER[g]] + '"></div>';
+    }
+    return '<div class="stbar" data-id="' + esc(s.id) + '"><div class="nm" title="' + esc(s.id) + '">' + esc(s.id) + "</div>" +
+      '<div class="track">' + segs + '</div><div class="val">' + fmt(vis(s)) + "</div></div>";
+  }).join("");
+  host.querySelectorAll(".stbar").forEach((el) => {
+    const s = STATIONS_BARS.find((x) => x.id === el.getAttribute("data-id")); if (!s) return;
+    const parts = []; let tot = 0;
+    for (let g = 0; g < GORDER.length; g++) {
+      if (s.segs[g] > 0 && !stHidden[GORDER[g]]) {
+        parts.push('<span style="color:' + GCOL[GORDER[g]] + '">' + cap1(GORDER[g]) + " <b>" + fmt(s.segs[g]) + "</b></span>");
+        tot += s.segs[g];
+      }
+    }
+    const sub = (s.setup ? '<div class="sub">' + s.setup + "</div>" : "") +
+      (s.lat != null ? '<div class="sub">' + s.lat + "°N, " + s.lon + "°E</div>" : "");
+    el.addEventListener("mousemove", (e) => showTip('<div class="t">' + esc(s.id) + " · " + fmt(tot) + " events</div>" +
+      sub + '<div class="rs">' + parts.join("") + "</div>", e));
+    el.addEventListener("mouseleave", hideTip);
+  });
+}
+
+/* ----- daily-rhythm ring (reference styling) ----- */
+var curClock = "All wildlife";
+function buildClock(optKey) {
+  const o = CLOCK[optKey]; if (!o) return; curClock = optKey;
+  const agg = (optKey === "All wildlife" || optKey === WHV_KEY);
+  const d = o.hr, col = agg ? "#f0a839" : colourFor(optKey), C = 200, R0 = 78, RMAX = 168;
+  const mx = Math.max(...d, 1), total = d.reduce((a, b) => a + b, 0);
+  function P(r, deg) { const a = (deg - 90) * Math.PI / 180; return [(C + r * Math.cos(a)).toFixed(1), (C + r * Math.sin(a)).toFixed(1)]; }
+  let s = '<defs><filter id="ringglow"><feGaussianBlur stdDeviation="2.4"/></filter></defs>';
+  const n1 = P(RMAX + 14, 270), n2 = P(RMAX + 14, 90);
+  s += '<path d="M' + n1[0] + " " + n1[1] + " A " + (RMAX + 14) + " " + (RMAX + 14) + " 0 0 1 " + n2[0] + " " + n2[1] + " L " + C + " " + C + ' Z" fill="#16233a" opacity="0.5"/>';
+  [R0, (R0 + RMAX) / 2, RMAX].forEach((r) => { s += '<circle cx="' + C + '" cy="' + C + '" r="' + r + '" fill="none" stroke="#243029" stroke-width="1"/>'; });
+  for (let h = 0; h < 24; h += 3) {
+    const t = P(RMAX + 26, h / 24 * 360);
+    s += '<text x="' + t[0] + '" y="' + (parseFloat(t[1]) + 4) + '" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="#647269">' + pad(h) + "</text>";
+  }
+  for (let k = 0; k < 24; k++) {
+    const len = R0 + (d[k] / mx) * (RMAX - R0), deg = k / 24 * 360, a = P(R0, deg), b = P(len, deg);
+    s += '<line x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="' + col + '" stroke-width="8" stroke-linecap="round" opacity="0.5" filter="url(#ringglow)"/>';
+    s += '<line class="spoke" data-h="' + k + '" data-v="' + d[k] + '" x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="' + col + '" stroke-width="7" stroke-linecap="round"/>';
+  }
+  s += '<text x="' + C + '" y="' + (C - 6) + '" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="30" fill="#e8efe9">' + fmt(total) + "</text>";
+  s += '<text x="' + C + '" y="' + (C + 16) + '" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#8fa39a">events</text>';
+  const host = $("fig_A");
+  host.innerHTML = '<div class="ring-legend"><span><i style="background:' + col + '"></i>Activity</span><span><i style="background:#2a3a55"></i>Night 18:00–06:00</span></div>' +
+    '<svg viewBox="0 0 400 400" class="dielring" role="img" aria-label="24-hour activity ring">' + s + "</svg>";
+  host.querySelectorAll(".spoke").forEach((el) => {
+    el.addEventListener("mousemove", (e) => {
+      showTip('<div class="t">' + pad(el.getAttribute("data-h")) + ":00 – " + pad((+el.getAttribute("data-h") + 1) % 24) + ":00 · " + fmt(+el.getAttribute("data-v")) + " events</div>", e);
+      el.setAttribute("stroke-width", "10");
+    });
+    el.addEventListener("mouseleave", () => { hideTip(); el.setAttribute("stroke-width", "7"); });
+  });
+  const cn = $("clockN"); if (cn) cn.textContent = "· " + fmt(total) + " timed detections";
+}
+
+/* ----- season: Timeline vs By-month, with group->species drilldown ----- */
+var SEASON = { mode: "T", drill: null };
+function seasonSpec() { const m = SF[SEASON.mode]; return (SEASON.drill && m.dr[SEASON.drill]) ? m.dr[SEASON.drill] : m.ov; }
+function seasonClick(e) {
+  if (!e.points || !e.points.length) return;
+  const pts = e.points.slice().sort((a, b) => a.curveNumber - b.curveNumber);
+  const ya = pts[0].yaxis; let yData = NaN;
+  try {
+    const gd = $("fig_D"), rect = gd.getBoundingClientRect();
+    const py = ((e.event && e.event.clientY != null) ? e.event.clientY : rect.top) - rect.top - ya._offset;
+    yData = ya.range[1] - (py / ya._length) * (ya.range[1] - ya.range[0]);
+  } catch (err) {}
+  let total = 0;
+  for (const p of pts) total += (p.y || 0);
+  if (!isFinite(yData) || yData < 0 || yData > total) return;
+  let cum = 0, g = null;
+  for (const p of pts) {
+    cum += (p.y || 0);
+    if (yData <= cum) { const d = p.data; g = d && d.meta && d.meta.guild; break; }
+  }
+  if (!g || !SF[SEASON.mode].dr[g]) return;
+  SEASON.drill = g; renderSeason();
+}
+function seasonLegendClick(e) {
+  if (SEASON.drill) return true;
+  const tr = e.data && e.data[e.curveNumber], g = tr && tr.meta && tr.meta.guild;
+  if (g && SF[SEASON.mode].dr[g]) { SEASON.drill = g; renderSeason(); }
+  return false;
+}
+function renderSeason() {
+  const host = $("fig_D");
+  if (typeof Plotly === "undefined") {
+    host.innerHTML = '<p class="hint">The seasonal chart needs the Plotly library, which loads from the internet. Reconnect and reload the page to see it.</p>';
+    return;
+  }
+  if (!SF || !SF.T.ov.data.length) { Plotly.purge("fig_D"); host.innerHTML = '<p class="hint">No dated events to show.</p>'; return; }
+  const sp = seasonSpec();
+  const lay = JSON.parse(JSON.stringify(sp.layout));
+  if (isNarrow()) {
+    lay.height = 300; lay.margin = { l: 42, r: 12, t: 60, b: 34 };
+    lay.font = lay.font || {}; lay.font.size = 11;
+    if (lay.legend) lay.legend.font = { size: 10 };
+    if (lay.yaxis) lay.yaxis.title = { text: "" };
+  }
+  Plotly.purge("fig_D");
+  Plotly.newPlot("fig_D", sp.data, lay, { displayModeBar: false, responsive: true }).then((gd) => {
+    if (!SEASON.drill) { gd.on("plotly_click", seasonClick); gd.on("plotly_legendclick", seasonLegendClick); }
+  });
+  $("back_D").style.display = SEASON.drill ? "inline-flex" : "none";
+}
+function setSeasonMode(m) {
+  SEASON.mode = m; SEASON.drill = null;
+  [...$("seasonTog").children].forEach((ch) => ch.classList.toggle("on", ch.dataset.m === m));
+  renderSeason();
+}
+
+/* ----- camera-grid map: positions from the field protocol ----- */
+var PROT = null, MAPOBJ = null, MAPMARKERS = [], curMap = "All wildlife";
+function stMeta(stid) {
+  const pr = PROT && PROT[stid];
+  if (!pr) return { setup: "", lat: null, lon: null };
+  let dts = "";
+  if (pr.setup instanceof Date) dts = fmtDay(pr.setup);
+  else if (pr.setup != null) dts = String(pr.setup);
+  let tstr = "";
+  if (pr.time instanceof Date) tstr = pad(pr.time.getHours()) + ":" + pad(pr.time.getMinutes());
+  else if (pr.time != null) tstr = String(pr.time);
+  const by = String(pr.by || "").trim();
+  const setup = dts ? ("Set up " + dts + (tstr ? " " + tstr : "") + (by ? " by " + by : "")) : "";
+  return { setup, lat: Math.round(pr.lat * 1e5) / 1e5, lon: Math.round(pr.lon * 1e5) / 1e5 };
+}
+function buildMapData() {
+  MAP_STATIONS = []; MAP_SPMAX = {}; MAP_MAXTOT = 1; N_MAP = 0;
+  MAP_ORDER = ["All wildlife", WHV_KEY];
+  const R = S.results;
+  if (!PROT || !Object.keys(PROT).length || !R) { MAPOPTS = []; return; }
+  const named = [...R.bySpecies.keys()].filter((p) => p !== "undefined" && p !== "empty").sort();
+  for (const [stid, info] of Object.entries(PROT)) {
+    const agg = R.stations.get(stid);
+    const sc = {};
+    if (agg) for (const p of named) { const v = agg.sp.get(p) || 0; if (v > 0) sc[p] = v; }
+    let tot = 0;
+    for (const [p, c] of Object.entries(sc)) { if (WILD_G.indexOf(guildOf(p)) !== -1) tot += c; }
+    const toth = tot + (sc.human || 0) + (sc.vehicle || 0);
+    const top5 = Object.entries(sc).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const meta = stMeta(stid);
+    const end = agg && isFinite(agg.dtMax) && agg.dtMax > 0 ? fmtDay(new Date(agg.dtMax)) : null;
+    const score = agg && agg.scoreN ? Math.round((agg.scoreSum / agg.scoreN) * 1000) / 1000 : null;
+    MAP_STATIONS.push({ id: stid.replace("WTM_", ""), lat: meta.lat, lon: meta.lon,
+      setup: (PROT[stid].setup instanceof Date) ? fmtDay(PROT[stid].setup) : String(PROT[stid].setup || ""),
+      end, seqs: agg ? agg.seqs : 0, tot, toth, spn: Object.keys(sc).length, top: top5, score, s: sc });
+    if (tot > MAP_MAXTOT) MAP_MAXTOT = tot;
+  }
+  for (const p of named) MAP_SPMAX[p] = Math.max(...MAP_STATIONS.map((m) => m.s[p] || 0), 1);
+  MAP_ORDER = ["All wildlife", WHV_KEY].concat(named);
+  N_MAP = MAP_STATIONS.length;
+  const lats = MAP_STATIONS.map((m) => m.lat), lons = MAP_STATIONS.map((m) => m.lon);
+  MAP_BOUNDS = { lat0: Math.min(...lats), lon0: Math.min(...lons), lat1: Math.max(...lats), lon1: Math.max(...lons) };
+  const maplabel = (o) => {
+    if (o === "All wildlife") return "All wildlife (" + fmt(MAP_STATIONS.reduce((s, m) => s + m.tot, 0)) + ")";
+    if (o === WHV_KEY) return WHV_KEY + " (" + fmt(MAP_STATIONS.reduce((s, m) => s + m.toth, 0)) + ")";
+    return cap1(o) + " (" + fmt(R.bySpecies.get(o) || 0) + ")";
+  };
+  MAPOPTS = MAP_ORDER.map((o) => [o, maplabel(o)]);
+  $("mapLead").innerHTML = "The " + N_MAP + " cameras at their real positions. Each circle is a camera; choose " +
+    "‘All wildlife’, ‘All wildlife, humans and vehicles’ or a single species to size the circles " +
+    "by how many detections each camera made, with empty cameras dimmed. Tap a camera for its details. If the map " +
+    "background does not appear, pick a different style from the control at the top right; the camera markers always work.";
+  $("placeNote").hidden = false;
+  const la0 = MAP_STATIONS.reduce((s, m) => s + m.lat, 0) / N_MAP;
+  const lo0 = MAP_STATIONS.reduce((s, m) => s + m.lon, 0) / N_MAP;
+  $("pl_ll").textContent = la0.toFixed(3) + "°N, " + lo0.toFixed(3) + "°E";
+}
+function popupHtml(s) {
+  const chips = s.top.length ? s.top.map((t) =>
+    '<span class="chip" style="color:' + colourFor(t[0]) + '">' + cap1(t[0]) + " " + t[1] + "</span>").join("") : "";
+  const rows = '<div class="row"><span>Wildlife events</span><b>' + fmt(s.tot) + "</b></div>" +
+    '<div class="row"><span>Species</span><b>' + s.spn + "</b></div>" +
+    '<div class="row"><span>Sequences</span><b>' + fmt(s.seqs) + "</b></div>" +
+    (s.score != null ? '<div class="row"><span>Mean conf.</span><b>' + s.score + "</b></div>" : "") +
+    (s.setup ? '<div class="row"><span>Start</span><b>' + s.setup + "</b></div>" : "") +
+    (s.end ? '<div class="row"><span>End</span><b>' + s.end + "</b></div>" : "");
+  return '<div class="pid">' + s.id + '</div><div class="stats">' + rows + "</div>" +
+    (chips ? '<div class="pri"><span class="plbl">Top 5</span>' + chips + "</div>" : '<div class="sps">No animal detections</div>');
+}
+function drawMarkers() {
+  if (!MAPOBJ) return;
+  MAPMARKERS.forEach((m) => MAPOBJ.removeLayer(m)); MAPMARKERS = [];
+  const isAll = (curMap === "All wildlife"), isAllH = (curMap === WHV_KEY), isAgg = isAll || isAllH;
+  const valFor = (s) => isAgg ? (isAllH ? s.toth : s.tot) : (s.s[curMap] || 0);
+  const mxAgg = Math.max(...MAP_STATIONS.map(valFor), 1);
+  const mxFlag = isAgg ? 1 : (MAP_SPMAX[curMap] || 1);
+  const spc = isAgg ? MAP_ALLCOL : colourFor(curMap);
+  const ordered = MAP_STATIONS.slice().sort((a, b) => valFor(a) - valFor(b));
+  ordered.forEach((s) => {
+    const val = valFor(s), active = isAgg ? true : val > 0;
+    const mk = L.circleMarker([s.lat, s.lon], {
+      radius: isAgg ? (val <= 0 ? 4 : 4 + Math.sqrt(val / mxAgg) * 26) : (active ? 5 + Math.sqrt(val / mxFlag) * 22 : 3.5),
+      fillColor: active ? spc : "#46554d", color: active ? "#0c1310" : "#2b352f",
+      weight: active ? 1 : 0.6, fillOpacity: active ? 0.82 : 0.28 });
+    mk.bindPopup(popupHtml(s), { minWidth: 320, maxWidth: 360 });
+    mk.addTo(MAPOBJ); MAPMARKERS.push(mk);
+  });
+  const note = $("mapNote");
+  if (note) {
+    if (isAgg) {
+      note.innerHTML = N_MAP + " of " + N_MAP + " cameras located · circles sized by " +
+        (isAllH ? "wildlife, human and vehicle" : "total wildlife") + " detections · tap a camera for detail";
+    } else {
+      const n = MAP_STATIONS.filter((s) => (s.s[curMap] || 0) > 0).length;
+      note.innerHTML = cap1(curMap) + ' recorded at <b style="color:#e8efe9">' + n + "</b> of " + N_MAP +
+        " cameras · circles sized by " + curMap + " detections";
+    }
+  }
+}
+function buildMap(optKey) { curMap = optKey; drawMarkers(); }
+function initMap() {
+  if (MAPOBJ || typeof L === "undefined" || !MAP_STATIONS.length || !MAP_BOUNDS) return;
+  MAPOBJ = L.map("fig_M", { scrollWheelZoom: false, zoomControl: true })
+    .fitBounds([[MAP_BOUNDS.lat0, MAP_BOUNDS.lon0], [MAP_BOUNDS.lat1, MAP_BOUNDS.lon1]], { padding: [28, 28] });
+  const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, subdomains: "abc", attribution: "© OpenStreetMap contributors" });
+  const streets = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png", { maxZoom: 20, subdomains: "abcd", attribution: "© OpenStreetMap contributors © CARTO" });
+  const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 17, attribution: "Tiles © Esri" });
+  const topo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: 17, attribution: "© OpenTopoMap (CC-BY-SA)" });
+  topo.addTo(MAPOBJ);
+  L.control.layers({ "OpenStreetMap": osm, "Streets (offline-safe)": streets, "Satellite": sat, "Terrain": topo }, null, { position: "topright" }).addTo(MAPOBJ);
+  setTimeout(() => { MAPOBJ.invalidateSize(); }, 60);
+}
+function renderMapPanel() {
+  if (!PROT || !Object.keys(PROT).length) {
+    $("protPick").hidden = typeof XLSX === "undefined";
+    $("protStatus").textContent = typeof XLSX === "undefined"
+      ? "the protocol reader needs the internet-loaded XLSX library"
+      : "no field protocol loaded — the map needs camera coordinates";
+    $("fig_M").innerHTML = '<p class="hint" style="padding:20px">Load the field protocol spreadsheet ' +
+      "(FieldProtocols_WTM_FAR_23.xlsx) to place the cameras. It is picked up automatically when it " +
+      "sits next to this page and the page is served over HTTP.</p>";
+    $("mapNote").textContent = "";
+    return;
+  }
+  $("protPick").hidden = true;
+  $("protStatus").textContent = Object.keys(PROT).length + " camera positions from the field protocol";
+  if (typeof L === "undefined") {
+    $("fig_M").innerHTML = '<p class="hint" style="padding:20px">The map library (Leaflet) failed to load; it needs an internet connection.</p>';
+    return;
+  }
+  if (!MAPOBJ) { $("fig_M").innerHTML = ""; initMap(); }
+  fillSelect("mapSel", MAPOPTS, curMap in CLOCK || MAP_ORDER.indexOf(curMap) !== -1 ? curMap : "All wildlife");
+  if (MAP_ORDER.indexOf(curMap) === -1) curMap = "All wildlife";
+  drawMarkers();
+}
+function parseProtocol(buf, label) {
+  try {
+    const wb = XLSX.read(buf, { type: "array", cellDates: true });
+    const shname = wb.SheetNames.indexOf("Koordinaten") !== -1 ? "Koordinaten" : wb.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[shname], { header: 1, raw: true });
+    const out = {};
+    for (const row of rows) {
+      if (!row || row[0] == null) continue;
+      const m = String(row[0]).match(WTM_RE);
+      if (!m) continue;
+      let lat = +row[5], lon = +row[6];
+      if (!isFinite(lat) || !isFinite(lon)) { lat = +row[3]; lon = +row[4]; }
+      if (!isFinite(lat) || !isFinite(lon)) continue;
+      out[m[1]] = { lat, lon, setup: row[7], time: row[8], by: row[9] };
+    }
+    if (!Object.keys(out).length) { $("protStatus").textContent = "no camera coordinates found in " + label; return; }
+    PROT = out;
+    if (S.results) { buildMapData(); renderMapPanel(); }
+  } catch (e) {
+    $("protStatus").textContent = "could not read " + label;
+  }
+}
+async function tryAutoProtocol() {
+  if (location.protocol !== "http:" && location.protocol !== "https:") return;
+  if (typeof XLSX === "undefined") return;
+  try {
+    const resp = await fetch("FieldProtocols_WTM_FAR_23.xlsx");
+    if (!resp.ok) return;
+    parseProtocol(await resp.arrayBuffer(), "FieldProtocols_WTM_FAR_23.xlsx");
+  } catch (e) { /* no protocol next to the page - the picker still works */ }
+}
+
+/* =============================== rendering ============================== */
+function fillSelect(id, opts, sel) {
+  const e = $(id); if (!e || !opts) return;
+  e.innerHTML = opts.map((o) => {
+    const val = String(o[0]).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    return '<option value="' + val + '"' + (o[0] === sel ? " selected" : "") + ">" + o[1] + "</option>";
+  }).join("");
+}
+function renderAll() {
+  $("figs").hidden = false;
+  sbHidden = {}; stHidden = {};
+  SEASON.mode = "T"; SEASON.drill = null;
+  [...$("seasonTog").children].forEach((ch) => ch.classList.toggle("on", ch.dataset.m === "T"));
+  recomputeGroups();
+  renderScalars();
+  fillSelect("clockSel", CLOCKOPTS, CLOCK_ORDER.indexOf(curClock) !== -1 ? curClock : "All wildlife");
+  if (CLOCK_ORDER.indexOf(curClock) === -1) curClock = "All wildlife";
+  buildClock(curClock);
+  renderSeason();
+  renderSpecies(); renderStations();
+  renderGLegend("sbLegend", SB_GROUPS, sbHidden, "sb");
+  renderGLegend("stLegend", ST_GROUPS, stHidden, "st");
+  renderMapPanel();
+  renderTable();
+}
+
+function renderTable() {
+  const R = S.results;
   const LIMIT = 300;
   const tb = $("resbody");
   tb.innerHTML = "";
@@ -917,16 +1464,15 @@ function renderResults() {
     const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
     const tr = document.createElement("tr");
     const when = isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 16).replace("T", " ") : "—";
-    /* Show the species the model actually chose. Below the threshold it is
-       shown in red rather than replaced by "undefined", which told the reader
-       nothing while the runner-up column named a species anyway. */
+    /* Show the species the model actually chose; below the threshold it is
+       shown in red rather than replaced by "undefined". */
     const shown = r.top1 || r.label;
     const cls = r.kind === "animal" ? "animal" : (r.kind === "undefined" ? "below" : "other");
     tr.innerHTML =
       '<td><span class="pill ' + cls + '">' + esc(shown) + "</span></td>" +
       '<td class="num">' + r.score.toFixed(3) + "</td>" +
-      '<td class="num muted">' + (r.second ? esc(r.second) + " " + r.secondScore.toFixed(3) : "—") + "</td>" +
-      '<td class="num muted">' + (r.third ? esc(r.third) + " " + r.thirdScore.toFixed(3) : "—") + "</td>" +
+      '<td class="num tmuted">' + (r.second ? esc(r.second) + " " + r.secondScore.toFixed(3) : "—") + "</td>" +
+      '<td class="num tmuted">' + (r.third ? esc(r.third) + " " + r.thirdScore.toFixed(3) : "—") + "</td>" +
       '<td class="num">' + S.nImg[i] + "</td>" +
       '<td class="num">' + fmtSecs(seqSeconds(i)) + "</td>" +
       "<td>" + esc(S.station[i]) + "</td>" +
@@ -944,101 +1490,15 @@ function renderResults() {
     ' (exported with prediction "undefined", the species kept in top1) · ' +
     '<span class="pill other">empty / human / vehicle</span>';
 }
-function fmtSecs(s) {
-  if (s < 60) return Math.round(s) + "s";
-  if (s < 3600) return Math.floor(s / 60) + "m " + String(Math.round(s % 60)).padStart(2, "0") + "s";
-  return (s / 3600).toFixed(1) + "h";
-}
-const tile = (k, v, sub) =>
-  '<div class="tile"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) +
-  '</div><div class="sub">' + esc(sub) + "</div></div>";
 
-/* ------------------------------- charts -------------------------------- */
-const tip = $("tip");
-function showTip(e, html) {
-  tip.innerHTML = html;
-  tip.style.opacity = "1";
-  const pad = 14;
-  let x = e.clientX + pad, y = e.clientY + pad;
-  const r = tip.getBoundingClientRect();
-  if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
-  if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
-  tip.style.left = x + "px"; tip.style.top = y + "px";
+/* =============================== downloads ============================== */
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
-const hideTip = () => { tip.style.opacity = "0"; };
-
-function barChart(mountId, data, unit) {
-  const mount = $(mountId);
-  if (!data.length) { mount.innerHTML = '<p class="hint">Nothing to show.</p>'; return; }
-  const rowH = 26, gap = 6, padL = 132, padR = 56, W = 520;
-  const H = data.length * (rowH + gap) + 8;
-  const max = Math.max(...data.map((d) => d.value));
-  const scale = (v) => Math.max(2, (v / max) * (W - padL - padR));
-  const title = mount.dataset.title || "Chart";
-  const shortLabel = (l) => (l.length > 17 ? "\u2026" + l.slice(-16) : l);
-  let s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(title) + '">';
-  data.forEach((d, i) => {
-    const y = i * (rowH + gap);
-    const w = scale(d.value);
-    s += '<g class="row">' +
-      '<text x="' + (padL - 10) + '" y="' + (y + rowH * 0.68) + '" text-anchor="end">' + esc(shortLabel(d.label)) + "</text>" +
-      '<rect class="mark" x="' + padL + '" y="' + y + '" width="' + w + '" height="' + rowH + '" rx="4"></rect>' +
-      '<text class="val" x="' + (padL + w + 8) + '" y="' + (y + rowH * 0.68) + '">' + fmt(d.value) + "</text>" +
-      '<rect class="hit" x="0" y="' + y + '" width="' + W + '" height="' + rowH + '"' +
-      ' data-l="' + esc(d.label) + '" data-v="' + d.value + '"></rect>' +
-      "</g>";
-  });
-  s += "</svg>";
-  mount.innerHTML = s;
-  wireHits(mount, unit);
-}
-
-function colChart(mountId, data) {
-  const mount = $(mountId);
-  if (!data.length || !data.some((d) => d.value > 0)) {
-    mount.innerHTML = '<p class="hint">Nothing to show.</p>'; return;
-  }
-  const W = 520, H = 220, padB = 34, padL = 44, padT = 10;
-  const max = Math.max(...data.map((d) => d.value));
-  const bw = (W - padL - 8) / data.length;
-  const y = (v) => padT + (1 - v / max) * (H - padT - padB);
-  const title = mount.dataset.title || "Chart";
-  let s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(title) + '">';
-  for (let g = 0; g <= 3; g++) {
-    const v = (max / 3) * g, yy = y(v);
-    s += '<line class="gridline" x1="' + padL + '" x2="' + W + '" y1="' + yy + '" y2="' + yy + '"></line>' +
-      '<text x="' + (padL - 8) + '" y="' + (yy + 4) + '" text-anchor="end">' + fmt(Math.round(v)) + "</text>";
-  }
-  data.forEach((d, i) => {
-    const x = padL + i * bw, h = Math.max(2, (H - padT - padB) - (y(d.value) - padT));
-    s += '<g class="col">' +
-      '<rect class="mark" x="' + (x + 1) + '" y="' + y(d.value) + '" width="' + Math.max(1, bw - 2) +
-      '" height="' + h + '" rx="3"></rect>' +
-      '<rect class="hit" x="' + x + '" y="' + padT + '" width="' + bw + '" height="' + (H - padT - padB) + '"' +
-      ' data-l="' + esc(d.label) + '" data-v="' + d.value + '"></rect>' + "</g>";
-  });
-  const step = Math.ceil(data.length / 8);
-  data.forEach((d, i) => {
-    if (i % step) return;
-    s += '<text x="' + (padL + i * bw + bw / 2) + '" y="' + (H - padB + 16) +
-      '" text-anchor="middle">' + esc(d.label) + "</text>";
-  });
-  s += "</svg>";
-  mount.innerHTML = s;
-  wireHits(mount, "events");
-}
-
-function wireHits(mount, unit) {
-  mount.querySelectorAll("rect.hit").forEach((r) => {
-    r.addEventListener("mousemove", (e) =>
-      showTip(e, "<div>" + esc(r.dataset.l) + '</div><div class="t-k">' +
-        fmt(+r.dataset.v) + " " + unit + "</div>"));
-    r.addEventListener("mouseleave", hideTip);
-  });
-  mount.addEventListener("mouseleave", hideTip);
-}
-
-/* =============================== download =============================== */
 function downloadCsv() {
   const R = S.results;
   if (!R) return;
@@ -1066,85 +1526,104 @@ function downloadCsv() {
   const stamp = new Date().toISOString().slice(0, 10);
   saveBlob(new Blob(parts, { type: "text/csv;charset=utf-8" }), "deepfaune_filtered_" + stamp + ".csv");
 }
-
-function saveBlob(blob, name) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-}
-
 function downloadSummary() {
   const R = S.results;
   if (!R) return;
   const rows = [...R.bySpecies.entries()].sort((a, b) => b[1] - a[1]);
-  let csv = "species,events,images\n";
+  let csv = "species,group,events,images,mean_confidence\n";
   rows.forEach(([k, v]) => {
-    csv += csvCell(k) + "," + v + "," + (R.imgBySpecies.get(k) || 0) + "\n";
+    const sc = R.scoreSum.get(k);
+    csv += csvCell(k) + "," + csvCell(guildOf(k)) + "," + v + "," + (R.imgBySpecies.get(k) || 0) + "," +
+      (sc != null ? (sc / v).toFixed(3) : "") + "\n";
   });
   const stamp = new Date().toISOString().slice(0, 10);
   saveBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "deepfaune_species_summary_" + stamp + ".csv");
 }
 
 /* ---------------------------- figure saving ----------------------------- */
-/* The on-page charts are styled by CSS variables, which an exported SVG or
-   PNG would lose; resolve the current theme's colours into an inline style
-   and paint a background so the file stands alone. */
-function chartStyles() {
-  const cs = getComputedStyle(document.documentElement);
-  const v = (name) => cs.getPropertyValue(name).trim();
-  return {
-    bg: v("--surface") || "#ffffff",
-    css: "svg{font-family:'IBM Plex Sans','Helvetica Neue',Arial,sans-serif}" +
-      "text{font-size:11px;fill:" + v("--ink-2") + "}" +
-      "text.val{fill:" + v("--ink") + ";font-weight:600}" +
-      ".gridline{stroke:" + v("--line-strong") + ";stroke-dasharray:2 3}" +
-      "rect.mark{fill:" + v("--data") + "}" +
-      "rect.hit{fill:transparent}",
-  };
-}
-function saveFigure(mountId, kind) {
-  const mount = $(mountId);
-  const svg = mount ? mount.querySelector("svg") : null;
+function saveRing(kind) {
+  const svg = $("fig_A").querySelector("svg");
   if (!svg) return;
   const NS = "http://www.w3.org/2000/svg";
-  const vb = svg.viewBox.baseVal;
-  const { bg, css } = chartStyles();
   const clone = svg.cloneNode(true);
   clone.setAttribute("xmlns", NS);
-  clone.setAttribute("width", vb.width);
-  clone.setAttribute("height", vb.height);
-  const style = document.createElementNS(NS, "style");
-  style.textContent = css;
+  clone.setAttribute("width", 400); clone.setAttribute("height", 400);
   const back = document.createElementNS(NS, "rect");
   back.setAttribute("x", 0); back.setAttribute("y", 0);
-  back.setAttribute("width", vb.width); back.setAttribute("height", vb.height);
-  back.setAttribute("fill", bg);
+  back.setAttribute("width", 400); back.setAttribute("height", 400);
+  back.setAttribute("fill", "#141d18");
   clone.insertBefore(back, clone.firstChild);
-  clone.insertBefore(style, clone.firstChild);
   const xml = new XMLSerializer().serializeToString(clone);
-  const base = (mount.dataset.title || mountId).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  if (kind === "svg") {
-    saveBlob(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }), base + ".svg");
-    return;
-  }
+  const base = "daily_rhythm_" + curClock.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (kind === "svg") { saveBlob(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }), base + ".svg"); return; }
   const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }));
   const img = new Image();
   img.onload = () => {
-    const SCALE = 2;   // crisp on high-density screens
     const canvas = document.createElement("canvas");
-    canvas.width = vb.width * SCALE;
-    canvas.height = vb.height * SCALE;
+    canvas.width = 800; canvas.height = 800;
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#141d18"; ctx.fillRect(0, 0, 800, 800);
+    ctx.drawImage(img, 0, 0, 800, 800);
     URL.revokeObjectURL(url);
     canvas.toBlob((b) => { if (b) saveBlob(b, base + ".png"); }, "image/png");
   };
   img.onerror = () => URL.revokeObjectURL(url);
   img.src = url;
+}
+function saveSeason() {
+  const gd = $("fig_D");
+  if (typeof Plotly === "undefined" || !gd.data) return;
+  const base = "through_the_seasons" + (SEASON.drill ? "_" + SEASON.drill.replace(/[^a-z0-9]+/g, "_") : "") +
+    (SEASON.mode === "S" ? "_by_month" : "_timeline");
+  Plotly.downloadImage(gd, { format: "png", width: 1040, height: 560, scale: 2, filename: base });
+}
+/* The bar panels are HTML, so redraw them onto a canvas for the PNG. */
+function saveBars(which) {
+  const SCALE = 2, W = 1040;
+  const rows = which === "sbars"
+    ? SPECIES.filter((d) => !sbHidden[d.g]).sort((a, b) => b[sbMetric] - a[sbMetric])
+        .map((d) => ({ name: cap1(d.species), segs: [[d[sbMetric], GCOL[d.g] || "#5c7065", d.dom ? 0.5 : 1]], val: d[sbMetric] }))
+    : STATIONS_BARS.slice()
+        .map((s) => {
+          const segs = []; let tot = 0;
+          for (let g = 0; g < GORDER.length; g++) {
+            if (s.segs[g] > 0 && !stHidden[GORDER[g]]) { segs.push([s.segs[g], GCOL[GORDER[g]], 1]); tot += s.segs[g]; }
+          }
+          return { name: s.id, segs, val: tot };
+        }).filter((r) => r.val > 0).sort((a, b) => b.val - a.val);
+  if (!rows.length) return;
+  const rowH = 26, padT = 16, padB = 16, nmW = 170, valW = 80, gap = 12;
+  const H = padT + padB + rows.length * rowH;
+  const mx = Math.max(...rows.map((r) => r.val), 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = W * SCALE; canvas.height = H * SCALE;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(SCALE, SCALE);
+  ctx.fillStyle = "#141d18"; ctx.fillRect(0, 0, W, H);
+  const trackX = nmW + gap, trackW = W - trackX - valW - gap - 16;
+  rows.forEach((r, i) => {
+    const y = padT + i * rowH;
+    ctx.fillStyle = "#e8efe9";
+    ctx.font = "12.5px Inter, sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    let nm = r.name;
+    while (nm.length > 3 && ctx.measureText(nm).width > nmW - 6) nm = nm.slice(0, -2);
+    if (nm !== r.name) nm += "…";
+    ctx.fillText(nm, nmW, y + rowH / 2);
+    ctx.fillStyle = "#0e1612";
+    ctx.beginPath(); ctx.roundRect(trackX, y + 4, trackW, rowH - 9, 4); ctx.fill();
+    let x = trackX;
+    for (const [v, col, op] of r.segs) {
+      const w = Math.max(1, (v / mx) * trackW);
+      ctx.globalAlpha = op; ctx.fillStyle = col;
+      ctx.fillRect(x, y + 4, w, rowH - 9);
+      ctx.globalAlpha = 1; x += w;
+    }
+    ctx.fillStyle = "#8fa39a";
+    ctx.font = "12px 'IBM Plex Mono', monospace"; ctx.textAlign = "right";
+    ctx.fillText(fmt(r.val), W - 16, y + rowH / 2);
+  });
+  const base = which === "sbars" ? "what_the_cameras_saw_" + sbMetric : "busiest_cameras";
+  canvas.toBlob((b) => { if (b) saveBlob(b, base + ".png"); }, "image/png");
 }
 
 /* ================================ wiring ================================ */
@@ -1183,16 +1662,63 @@ $("minlen").addEventListener("input", invalidate);
 $("sp-all").addEventListener("click", () => setAllSpecies(true));
 $("sp-none").addEventListener("click", () => setAllSpecies(false));
 $("sp-romania").addEventListener("click", () => setAllSpecies(true, ROMANIA_ABSENT));
-$("generate").addEventListener("click", () => { $("generate").disabled = true; generate().finally(() => { $("generate").disabled = false; }); });
+$("generate").addEventListener("click", () => {
+  $("generate").disabled = true;
+  generate().finally(() => { $("generate").disabled = false; });
+});
 $("download").addEventListener("click", downloadCsv);
 $("dl-summary").addEventListener("click", downloadSummary);
-document.querySelectorAll("button[data-save]").forEach((b) =>
-  b.addEventListener("click", () => saveFigure(b.dataset.save, b.dataset.fmt)));
-$("theme").addEventListener("click", () => {
-  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  const cur = document.documentElement.getAttribute("data-theme") || (dark ? "dark" : "light");
-  document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+$("scopeTog").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b || b.dataset.v === SCOPE) return;
+  SCOPE = b.dataset.v;
+  [...$("scopeTog").children].forEach((ch) => ch.classList.toggle("on", ch === b));
+  $("scopeNote").textContent = SCOPE === "survey"
+    ? "systematic survey only" : "includes files not in Camera Trap Monitoring/Collections";
+  if (S.loaded) generate();
 });
+$("mapSel").addEventListener("change", (e) => buildMap(e.target.value));
+$("clockSel").addEventListener("change", (e) => buildClock(e.target.value));
+$("seasonTog").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b || !b.dataset.m) return;
+  setSeasonMode(b.dataset.m);
+});
+$("back_D").addEventListener("click", () => { SEASON.drill = null; renderSeason(); });
+$("protPick").addEventListener("click", () => $("protFile").click());
+$("protFile").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (f) parseProtocol(await f.arrayBuffer(), f.name);
+});
+document.querySelectorAll("button[data-save]").forEach((b) =>
+  b.addEventListener("click", () => {
+    const k = b.dataset.save;
+    if (k === "ring") saveRing(b.dataset.fmt);
+    else if (k === "season") saveSeason();
+    else saveBars(k);
+  }));
+
+var _rt, _lastN = isNarrow();
+function _mapSize() { if (MAPOBJ) { try { MAPOBJ.invalidateSize(); } catch (e) {} } }
+function _resizeAll() {
+  const el = $("fig_D");
+  if (el && el.data && typeof Plotly !== "undefined") { try { Plotly.Plots.resize(el); } catch (e) {} }
+  _mapSize();
+}
+function _rebuildAll() {
+  if (!S.results) return;
+  buildClock(curClock); renderSeason(); renderSpecies(); renderStations();
+  if (MAPOBJ) drawMarkers();
+  _mapSize();
+}
+window.addEventListener("resize", () => {
+  clearTimeout(_rt);
+  _rt = setTimeout(() => {
+    const n = isNarrow();
+    if (n !== _lastN) { _lastN = n; _rebuildAll(); } else { _resizeAll(); }
+  }, 220);
+});
+window.addEventListener("orientationchange", () => setTimeout(_rebuildAll, 300));
+
+tryAutoProtocol();
 tryAutoLoad();
 </script>
 </body>

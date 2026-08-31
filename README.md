@@ -232,21 +232,34 @@ onto, when the drive has since been remounted elsewhere.
 ## Dashboard and result filter
 
 `dashboard_and_filter.html` on the Desktop opens in a browser and reads the
-master CSV locally - nothing is uploaded. When served from the out-dir (for
-example `python3 -m http.server 8000` next to the master file) it loads
-`deepfaune_master.csv` automatically; opened any other way, choose or drag the
-file in. Because the `score_*` columns hold the complete distribution over
-every animal class, it re-derives predictions rather than just filtering the
-ones already written: set a global or per-species confidence threshold (typed
-or by slider), require a minimum sequence length in seconds, and untick species
-that cannot occur so their detections fall to the next-best species. The events
-table shows the top three species with scores to three decimal places, naming
-the top choice even when it scored below the threshold (shown in red rather
-than hidden behind "undefined"). Summary tiles and charts cover species,
-months, hour of day and busiest stations; events whose camera clock was wrong
-(1970 dates) are counted but left off the time charts. Each figure saves as
-PNG or SVG, the species summary saves as a CSV, and the filtered events export
-as a CSV with `top2`/`top3` columns. Events are grouped by `sequence_id`.
+master CSV locally - nothing is uploaded. It carries the full survey dashboard,
+computed live from whatever filters are set: the header KPIs, the camera-grid
+map, the daily-rhythm ring, the through-the-seasons stacked chart (weekly
+timeline or by-month, with a click-through from ecological group to species),
+the what-the-cameras-saw species bars (events or photos, guild legend
+toggles) and the busiest-cameras bars, followed by the events table.
+
+When served from the out-dir (for example `python3 -m http.server 8000` next
+to the master file) it loads `deepfaune_master.csv` automatically, and picks
+up `FieldProtocols_WTM_FAR_23.xlsx` from the same folder to place the
+camera-grid map; opened any other way, choose or drag the files in (the map
+panel offers its own picker for the protocol). Because the `score_*` columns
+hold the complete distribution over every animal class, it re-derives
+predictions rather than just filtering the ones already written: set a global
+or per-species confidence threshold (typed or by slider), require a minimum
+sequence length in seconds, untick species that cannot occur so their
+detections fall to the next-best species, and switch scope between the
+official survey (Camera Trap Monitoring/Collections) and all images. The
+events table shows the top three species with scores to three decimal places,
+naming the top choice even when it scored below the threshold (shown in red
+rather than hidden behind "undefined"). Events whose camera clock was wrong
+(1970 dates) are counted in station and map totals but left off the time
+panels, exactly as in the original dashboard. The ring saves as PNG or SVG,
+the seasonal chart and both bar panels save as PNG, the species summary saves
+as a CSV, and the filtered events export as a CSV with `top2`/`top3` columns.
+The seasonal chart and the map load their libraries (Plotly, Leaflet) from
+public CDNs, so those two panels need an internet connection the first time;
+everything else works offline. Events are grouped by `sequence_id`.
 
 ## Auto-resume service
 

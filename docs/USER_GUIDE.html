@@ -8,11 +8,16 @@
   body { font-family: system-ui, Arial, sans-serif; line-height: 1.6;
          max-width: 760px; margin: 24px auto; padding: 0 16px; color: #1d2b24; }
   h1 { font-size: 1.7rem; }
-  h2 { font-size: 1.2rem; margin-top: 1.6rem; border-bottom: 2px solid #cfe3d8; padding-bottom: 4px; }
+  h2 { font-size: 1.2rem; margin-top: 1.8rem; border-bottom: 2px solid #cfe3d8; padding-bottom: 4px; }
+  h3 { font-size: 1.02rem; margin-top: 1.2rem; }
   ol, ul { padding-left: 1.3rem; }
   li { margin: 0.4rem 0; }
   .note { background: #f3f8f5; border: 1px solid #d6e6dd; border-radius: 8px; padding: 10px 16px; margin: 12px 0; }
   code { background: #eef3f0; padding: 1px 5px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.95rem; margin: 10px 0; }
+  th, td { border: 1px solid #d6e6dd; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #f3f8f5; }
+  .toc { background: #f3f8f5; border: 1px solid #d6e6dd; border-radius: 8px; padding: 10px 16px 10px 30px; margin: 14px 0; }
 </style>
 </head>
 <body>
@@ -20,78 +25,223 @@
 <h1>Camera-trap classification: user guide</h1>
 <p>This tool reviews the camera-trap photographs on the hard drive and records
 the species in each image. It then produces summary tables and an interactive
-dashboard. You do not need to use the command line; the steps below are all you
-need.</p>
+dashboard and result filter page. The first part of this guide is all you need
+for everyday use; the later sections explain the settings, the result files and
+what to do if something goes wrong.</p>
 
-<h2>Running the tool</h2>
+<ol class="toc">
+  <li><a href="#quick">Quick guide: running the tool</a></li>
+  <li><a href="#settings">What the settings mean</a></li>
+  <li><a href="#during">While it is processing</a></li>
+  <li><a href="#incremental">Adding new photographs later</a></li>
+  <li><a href="#results">The result files</a></li>
+  <li><a href="#dashboard">The dashboard and result filter page</a></li>
+  <li><a href="#columns">Understanding the result columns</a></li>
+  <li><a href="#stops">If processing stops</a></li>
+  <li><a href="#commands">Useful commands</a></li>
+  <li><a href="#support">Support</a></li>
+</ol>
+
+<h2 id="quick">1. Quick guide: running the tool</h2>
 <ol>
   <li>Connect the "My Book" hard drive to the computer.</li>
   <li>Open the <b>Run DeepFaune</b> icon on the desktop (double-click it).
       <div class="note">The first time only: right-click the icon and choose
       <b>Allow Launching</b>, then open it.</div></li>
-  <li>The tool asks you to confirm a few settings. Press <b>Enter</b> to accept
-      a suggested value, or type a new value and then press <b>Enter</b>.</li>
+  <li>If a newer version is available, the tool offers to update itself first;
+      answering <b>y</b> is safe and takes a few seconds.</li>
+  <li>The tool finds the hard drive and reports how much of the archive is
+      already done. Press <b>Enter</b> to accept the drive it found.</li>
+  <li>It then asks you to confirm a few settings. If you are continuing an
+      existing run it says <b>"Reusing from that run"</b> and suggests exactly
+      the settings that run used; press <b>Enter</b> to accept each one, or type
+      a new value and press <b>Enter</b>. Confirm with <b>Y</b> at the end.</li>
   <li>Processing begins. A live display shows how many images are done, the
       percentage complete, and the estimated finish time.</li>
 </ol>
 
-<h2>What the settings mean</h2>
-<p>At step 3 the tool shows a few settings. You can press Enter to accept the
-recommended values; they are sensible for this survey. If you do want to change
-one, here is what each means.</p>
+<h2 id="settings">2. What the settings mean</h2>
+<p>Press Enter to accept the suggested values; they are sensible for this
+survey, and when you are continuing a run they are that run's own settings, so
+the whole archive stays consistent. If you do want to change one, here is what
+each means.</p>
 <ul>
-  <li><b>Confidence threshold</b> (recommended 0.5) - how sure the tool must be
-      before it names a species. A higher value (for example 0.8) means it only
-      commits when very confident: fewer wrong names, but more animals are left
-      labelled "undefined". A lower value names more photos, but more of those
-      names are wrong. 0.5 is a balanced middle.</li>
-  <li><b>Sequence gap</b> (recommended 20 seconds) - photos taken within this many
-      seconds at the same camera are treated as one sighting, so a quick burst of
-      frames is counted once rather than many times. A larger gap groups more
-      photos together; a smaller gap counts them more separately.</li>
-  <li><b>Detector</b> (recommended DF) - the method that first finds the animal in
-      each photo. DF is the fastest. The others are more thorough but slower.</li>
-  <li><b>Birds</b> (recommended on) - also sorts birds into groups, such as
-      corvid, raptor or passerine, instead of just "bird".</li>
-  <li><b>Processor cores</b> (recommended 4) - how much of the computer to use.
-      More is faster but makes the computer work harder; fewer is gentler.</li>
+  <li><b>Detector</b> - the first stage, which finds the animal, human or
+      vehicle in each photo. A separate model then names the species, and that
+      part is the same whichever detector you choose. From fastest to most
+      thorough:
+      <ul>
+        <li><b>DF</b> - DeepFaune's own detector, trained on European
+            camera-trap images. The lightest and fastest.</li>
+        <li><b>MDS</b> - MegaDetector "sorrel", the widely used general-purpose
+            detector. Similar speed to DF but trained differently, so it finds
+            some things DF misses.</li>
+        <li><b>DFbsMDS</b> - runs DF first and tries MDS only on photos where DF
+            found nothing. A cheap way to recover a few extra animals.</li>
+        <li><b>DFMDS</b> - runs both detectors on every photo and merges the
+            results. The most thorough of the standard options, but the
+            slowest.</li>
+        <li><b>MDR</b> - MegaDetector "redwood" at higher resolution. Meant for
+            a computer with a graphics card; avoid it on this machine.</li>
+      </ul></li>
+  <li><b>Birds</b> - when on, birds are also sorted into groups such as corvid,
+      raptor or passerine, instead of just "bird".</li>
+  <li><b>Confidence threshold</b> - how sure the tool must be before it names a
+      species. Higher (for example 0.8) means it only commits when very
+      confident: fewer wrong names, but more animals left labelled "undefined".
+      Lower names more photos, but more of those names are wrong. Whatever you
+      choose here, the raw scores are all recorded, so the threshold can be
+      changed later in the dashboard page without reprocessing anything.</li>
+  <li><b>Sequence gap</b> (maxlag) - photos taken within this many seconds of
+      the <i>previous</i> photo at the same camera are chained into one
+      sighting (a "sequence" or detection event), so a burst of frames is
+      counted once. Note the chain can be much longer than the gap itself: an
+      animal that lingers keeps re-triggering the camera, and each photo within
+      the gap of the previous one extends the same event.</li>
+  <li><b>Batch size</b> - how many image crops are classified at once. Affects
+      speed and memory only, never the results.</li>
+  <li><b>Processor cores</b> - how much of the computer to use. More is faster
+      but uses more memory and runs hotter.</li>
+  <li><b>Update interval</b> - how often the master results file refreshes
+      during a run. Affects how often you see progress, not the results.</li>
 </ul>
-<p>The other settings can be left as they are.</p>
+<div class="note">There is no species-exclusion setting. Excluding species that
+cannot occur here (ibex, reindeer and so on) is done afterwards in the
+dashboard and result filter page, where it is reversible and gives an identical
+result, because the raw score for every species is recorded regardless.</div>
 
-<h2>While it is processing</h2>
+<h2 id="during">3. While it is processing</h2>
 <ul>
   <li>A large archive can take several days. This is expected.</li>
-  <li>You may close the window or disconnect from the computer (if connected remotely); processing
-      continues on the computer itself.</li>
+  <li>You may close the window or disconnect from the computer (if connected
+      remotely); processing continues on the computer itself. Closing the live
+      display with <b>Ctrl+C</b> also only closes the display, never the
+      run.</li>
   <li>Open the <b>Run DeepFaune</b> icon again at any time to view progress.</li>
   <li>Keep the hard drive connected while it runs.</li>
+  <li>Progress is saved folder by folder, so nothing is ever lost by a stop:
+      the tool always resumes from where it left off and never repeats finished
+      work.</li>
 </ul>
 
-<h2>Adding new photographs later</h2>
+<h2 id="incremental">4. Adding new photographs later</h2>
 <p>In normal use you will not reprocess the whole archive. When you copy new
 camera-trap photographs onto the hard drive, run the tool again. It processes
-only the new folders and updates the results and the dashboard. This is the main
+only the new folders and refreshes the result files. This is the main
 day-to-day use of the tool.</p>
 
-<h2>Results</h2>
-<p>When processing finishes, the dashboard opens automatically in a web browser.
-The following files are saved to the desktop:</p>
+<h2 id="results">5. The result files</h2>
+<p>These are saved to the desktop and refreshed at the end of a run (the master
+also refreshes during the run):</p>
 <ul>
-  <li><b>deepfaune_dashboard.html</b> - interactive charts and a camera map.
-      Open it in a web browser. It also refreshes while processing, so you can
-      open it early to follow progress.</li>
+  <li><b>dashboard_and_filter.html</b> - the interactive dashboard and result
+      filter. Open it in a web browser; see the next section.</li>
   <li><b>deepfaune_wildlife.csv</b> - the animal detections only. Opens in Excel.</li>
   <li><b>deepfaune_summary.csv</b> - totals per species and per camera. Opens in Excel.</li>
-  <li><b>deepfaune_master.csv</b> - every image. This file is very large, so open
-      it in R rather than Excel.</li>
+  <li><b>deepfaune_master.csv</b> - one row for every image, with the full raw
+      model outputs. This file is very large, so open it in R (or load it into
+      the dashboard page) rather than Excel.</li>
+</ul>
+<p>Working files stay in <code>~/df_out</code>: one CSV per photo folder (the
+source of truth, and what makes resuming possible), the merged
+<code>master.csv</code>, the run's settings and status files, and a detailed
+log.</p>
+
+<h2 id="dashboard">6. The dashboard and result filter page</h2>
+<p>Open <b>dashboard_and_filter.html</b> in a web browser and choose the master
+CSV (or drag it in). Everything is computed on your own computer; nothing is
+uploaded. The page shows the survey statistics, a camera map (the camera
+positions are built in), a day-and-night activity ring, seasonal charts, species
+and busiest-camera charts, and a table of every detection event.</p>
+<p>Its key idea: because the raw score for every species is recorded for every
+image, the page <i>re-derives</i> the predictions under whatever rules you set,
+without reprocessing anything. You can:</p>
+<ul>
+  <li>set a different confidence threshold, overall or per species;</li>
+  <li>untick species that cannot occur in the survey area (there is a one-click
+      Romania preset), so their detections fall to the next-best species;</li>
+  <li>require a minimum sequence length in seconds;</li>
+  <li>include or exclude empty, human and vehicle events, and choose between
+      the official survey and all images;</li>
+  <li>click a table row to preview that event's photographs (when the image
+      files are reachable from where the page is opened);</li>
+  <li>save any figure as an image, and download the filtered results as a CSV
+      per event or per image.</li>
+</ul>
+<p>To use it from a phone or tablet on the same network: on the computer run
+<code>cd ~/Desktop && python3 -m http.server 8000</code>, then open
+<code>http://&lt;computer-ip&gt;:8000/dashboard_and_filter.html</code> in the
+phone's browser. Served this way it loads the master file automatically.</p>
+
+<h2 id="columns">7. Understanding the result columns</h2>
+<p>Each row of the master (and wildlife) file is one image:</p>
+<table>
+  <tr><th>Column</th><th>Meaning</th></tr>
+  <tr><td><code>filename</code>, <code>date</code>, <code>seqnum</code></td>
+      <td>The image, its date from the camera, and the sequence (detection
+      event) it was grouped into.</td></tr>
+  <tr><td><code>prediction_seq</code>, <code>top1_seq</code>,
+      <code>score_seq</code>, <code>above_threshold</code></td>
+      <td>The sequence-level verdict. Below the threshold
+      <code>prediction_seq</code> reads "undefined", but <code>top1_seq</code>
+      keeps the best-scoring species and <code>score_seq</code> its score, so
+      no information is lost.</td></tr>
+  <tr><td><code>prediction_image</code>, <code>top1_image</code>,
+      <code>score_image</code></td>
+      <td>The same, per single image (no sequence averaging).</td></tr>
+  <tr><td><code>animal_count</code>, <code>human_count</code></td>
+      <td>How many animal and human boxes the detector found.</td></tr>
+  <tr><td><code>det_conf_animal</code> / <code>_human</code> / <code>_vehicle</code></td>
+      <td>The detector's best box confidence per category (0 = nothing found).</td></tr>
+  <tr><td><code>score_&lt;species&gt;</code> (one column per species)</td>
+      <td>The classifier's raw score for every species, recorded whatever the
+      threshold. Blank when no animal was found (there was nothing to
+      classify). These columns are what make the retrospective filtering
+      possible.</td></tr>
+  <tr><td><code>birdscore_&lt;group&gt;</code> (when birds is on)</td>
+      <td>The bird sub-classifier's scores; only meaningful when the animal is
+      a bird.</td></tr>
+  <tr><td><code>sequence_id</code></td>
+      <td>A globally unique key for the detection event, formed from a short
+      code for the folder plus the sequence number. <code>seqnum</code> alone
+      is <b>not</b> unique (it restarts at 1 in every folder), so always count
+      events by <code>sequence_id</code>. The id is stable: the same event
+      keeps the same id however the results are rebuilt.</td></tr>
+</table>
+
+<h2 id="stops">8. If processing stops</h2>
+<ul>
+  <li><b>Drive disconnected or computer restarted:</b> reconnect the drive and
+      open the <b>Run DeepFaune</b> icon again. The tool resumes from where it
+      stopped with the same settings, and never repeats finished work.</li>
+  <li><b>Crashes:</b> if the auto-resume service is installed, a run that dies
+      of a crash or memory exhaustion restarts itself within two minutes, with
+      its own settings. A run you stopped on purpose stays stopped, and nothing
+      starts by itself after a reboot.</li>
+  <li><b>Finding out what happened:</b> in a terminal, <code>dfrun
+      --diagnose</code> prints the run's settings, the last recorded system
+      readings and a one-line verdict (memory exhaustion, full disk, drive
+      disconnect, reboot, or software fault) without touching the run.</li>
 </ul>
 
-<h2>If processing stops</h2>
-<p>If the hard drive disconnects or the computer restarts, reconnect the drive
-and open the <b>Run DeepFaune</b> icon again. The tool resumes from where it
-stopped and never repeats work it has already completed.</p>
+<h2 id="commands">9. Useful commands</h2>
+<p>Everything below is optional; the desktop icon covers normal use. In a
+terminal:</p>
+<table>
+  <tr><th>Command</th><th>What it does</th></tr>
+  <tr><td><code>dfrun</code></td><td>Start or resume a run, or reattach to the
+      live display of a running one.</td></tr>
+  <tr><td><code>dfrun --stop</code></td><td>Stop the run cleanly. Nothing will
+      restart it until you relaunch.</td></tr>
+  <tr><td><code>dfrun --diagnose</code></td><td>Print settings, progress and a
+      verdict on why a run stopped, without touching anything.</td></tr>
+  <tr><td><code>dfrun --outputs</code></td><td>Rebuild the master and desktop
+      files from the finished work, without reprocessing anything.</td></tr>
+  <tr><td><code>dfrun --install-service</code></td><td>Install the auto-resume
+      service (see above). <code>--uninstall-service</code> removes it.</td></tr>
+</table>
 
-<h2>Support</h2>
+<h2 id="support">10. Support</h2>
 <p>Tom Ratsakatika - trr26@cam.ac.uk / ratsakatika@gmail.com, or open an issue at
 <a href="https://github.com/ratsakatika/deepfaune-fcc">github.com/ratsakatika/deepfaune-fcc</a>.</p>
 

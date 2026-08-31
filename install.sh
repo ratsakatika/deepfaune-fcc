@@ -62,6 +62,12 @@ EOF
     cp "${REPO_DIR}/docs/USER_GUIDE.html" "${DESKTOP_DIR}/How_to_use_dfrun.html"
     echo "Installed guide: ${DESKTOP_DIR}/How_to_use_dfrun.html"
   fi
+
+  # Filtering workbench: opens in a browser, reads the master CSV locally.
+  if [ -f "${REPO_DIR}/filter_workbench.html" ]; then
+    cp "${REPO_DIR}/filter_workbench.html" "${DESKTOP_DIR}/deepfaune_filter.html"
+    echo "Installed workbench: ${DESKTOP_DIR}/deepfaune_filter.html"
+  fi
 else
   echo "No ${DESKTOP_DIR}; skipped the Desktop shortcut."
 fi

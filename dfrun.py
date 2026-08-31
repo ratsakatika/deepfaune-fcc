@@ -43,7 +43,7 @@ TOOL_NAME = "dfrun"
 # for medium features, first for complete overhauls. See CLAUDE.md
 # ("Versioning") - the self-updater shows this to users, so a stale number
 # makes different code report the same version.
-TOOL_VERSION = "1.5.1"
+TOOL_VERSION = "1.5.2"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -94,6 +94,7 @@ DESKTOP_WILDLIFE = "deepfaune_wildlife.csv"
 DESKTOP_SUMMARY = "deepfaune_summary.csv"
 DESKTOP_DASHBOARD = "deepfaune_dashboard.html"
 DESKTOP_GUIDE = "How_to_use_dfrun.html"
+DESKTOP_WORKBENCH = "deepfaune_filter.html"
 
 # The dashboard builder (in the software dir) and the field protocol it reads.
 DASHBOARD_BUILDER = "build_dashboard.py"
@@ -2163,6 +2164,10 @@ def finish_outputs(out_dir, software_dir, force_merge=False, canonical_root=None
     else:
         print("  dashboard not built (see dashboard.log); the CSVs are still available")
     print("Open the wildlife and summary files in Excel, the master in R, and the dashboard in a browser.")
+    workbench = os.path.join(DESKTOP_DIR, DESKTOP_WORKBENCH)
+    if os.path.exists(workbench):
+        print(f"To filter by your own thresholds and species, open {DESKTOP_WORKBENCH} "
+              f"and load {DESKTOP_MASTER}.")
 
 
 if __name__ == "__main__":

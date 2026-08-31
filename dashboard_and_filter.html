@@ -568,8 +568,9 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
           column names (<code>prediction_seq</code>, <code>top1_seq</code>, <code>score_seq</code>,
           <code>above_threshold</code>...) plus second and third choices and event extras.</li>
         <li><b>Download images CSV</b> - re-reads the master and writes only the rows of
-          surviving events, with exactly the master's columns; the sequence-level verdict
-          columns are refreshed to match the current filters.</li>
+          surviving events, with the master's columns plus <code>top2_seq</code>/<code>top3_seq</code>
+          and their scores beside <code>top1_seq</code>; the sequence-level verdict columns are
+          refreshed to match the current filters.</li>
         <li><b>Save species summary</b> - species, group, events, images and mean confidence.</li>
         <li>Each figure saves as an image (PNG, and SVG for the rhythm ring).</li>
       </ul>
@@ -2109,13 +2110,23 @@ async function downloadImagesCsv() {
   let header = null, col = {}, seqCol = -1, wrote = 0;
   const t0 = performance.now();
   const grouper = S.loadedGap != null ? makeGrouper(S.loadedGap) : null;
+  /* top2/top3 columns are spliced in right after score_seq (blank on empty,
+     human and vehicle rows), so every row keeps the same column count. */
+  let insertAt = -1;
   const handleLine = (line) => {
     if (first) {
       first = false;
       header = splitCsv(line).map((h) => h.trim());
       header.forEach((h, j) => { col[h] = j; });
       seqCol = col.sequence_id != null ? col.sequence_id : -1;
-      buf += line + "\n";
+      if (col.score_seq != null) {
+        insertAt = col.score_seq + 1;
+        const h2 = header.slice();
+        h2.splice(insertAt, 0, "top2_seq", "top2_score", "top3_seq", "top3_score");
+        buf += h2.join(",") + "\n";
+      } else {
+        buf += line + "\n";
+      }
       return;
     }
     const p2 = splitCsv(line);
@@ -2127,14 +2138,23 @@ async function downloadImagesCsv() {
     const i = S.map.get(key);
     const r = i !== undefined ? kept[i] : undefined;
     if (!r) return;
-    if (r.top1 && col.prediction_seq != null) {
+    const animal = r.top1 && col.prediction_seq != null;
+    if (animal) {
       p2[col.prediction_seq] = r.label;
       if (col.top1_seq != null) p2[col.top1_seq] = r.top1;
       if (col.score_seq != null) p2[col.score_seq] = r.score.toFixed(4);
       if (col.above_threshold != null) p2[col.above_threshold] = r.kind === "animal" ? "yes" : "no";
+    }
+    if (insertAt >= 0) {
+      if (animal) {
+        p2.splice(insertAt, 0, r.second || "", r.second ? r.secondScore.toFixed(4) : "",
+          r.third || "", r.third ? r.thirdScore.toFixed(4) : "");
+      } else {
+        p2.splice(insertAt, 0, "", "", "", "");
+      }
       buf += p2.map(csvCell).join(",") + "\n";
     } else {
-      buf += line + "\n";   /* empty / human / vehicle rows pass through untouched */
+      buf += (animal ? p2.map(csvCell).join(",") : line) + "\n";
     }
     wrote++;
     if (buf.length > 1 << 20) { parts.push(buf); buf = ""; }

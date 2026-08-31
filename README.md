@@ -270,9 +270,9 @@ saves as a CSV. Two filtered exports are offered: an events CSV (one row per eve
 the master's column names wherever an event-level equivalent exists -
 `prediction_seq`, `top1_seq`, `score_seq`, `above_threshold`, EXIF-style
 dates - plus second/third choices and event extras) and an images CSV that
-re-reads the master and keeps exactly its columns, writing only the rows of
-surviving events with the sequence-level verdict columns refreshed to the
-re-derived result. A Help button at the top opens a built-in guide to the
+re-reads the master and keeps its columns (plus `top2_seq`/`top3_seq` and
+their scores beside `top1_seq`), writing only the rows of surviving events
+with the sequence-level verdict columns refreshed to the re-derived result. A Help button at the top opens a built-in guide to the
 filters, panels and numbers.
 
 Species scores are always the softmax over ALL classes: an unticked species

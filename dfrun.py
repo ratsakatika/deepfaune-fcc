@@ -43,7 +43,7 @@ TOOL_NAME = "dfrun"
 # for medium features, first for complete overhauls. See CLAUDE.md
 # ("Versioning") - the self-updater shows this to users, so a stale number
 # makes different code report the same version.
-TOOL_VERSION = "1.5.0"
+TOOL_VERSION = "1.5.1"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -1003,6 +1003,8 @@ def build_dashboard(software_dir, out_dir, open_after=False):
     Runs the builder in a subprocess so its memory is released and a failure
     cannot disrupt the run. Returns the HTML path or None.
     """
+    if not software_dir:
+        return None  # no builder location known; the CSVs are still written
     cmd, out_html = dashboard_command(software_dir, out_dir)
     if not cmd:
         return None
@@ -1977,6 +1979,7 @@ def build_arg_parser():
     parser.add_argument("--attach", action="store_true", help="Attach to the live readout of a running worker and exit.")
     parser.add_argument("--dashboard", action="store_true", help="Build and open the dashboard from the current results, then exit.")
     parser.add_argument("--diagnose", action="store_true", help="Print run settings, the flight recorder tail, and a crash/health verdict, then exit.")
+    parser.add_argument("--outputs", action="store_true", help="Rebuild master.csv and every Desktop output from the shard CSVs now (adds sequence_id and normalises paths), then exit. Use --source to set the archive root for the paths.")
     parser.add_argument("--stop", action="store_true", help="Intentionally stop the current run (clean boundary; nothing restarts it until you relaunch).")
     parser.add_argument("--install-service", action="store_true", help="Install a systemd service that restarts the worker after an OOM kill or crash, resuming the current run's own settings. Never restarts an intentionally stopped or finished run, and does not autostart at boot (needs sudo).")
     parser.add_argument("--uninstall-service", action="store_true", help="Disable and remove the auto-resume service (needs sudo).")
@@ -2010,6 +2013,16 @@ def main(argv=None):
     # Diagnose mode: read-only, no update check, no drive needed.
     if args.diagnose:
         return run_diagnose(out_dir)
+
+    # Rebuild every output from the shard CSVs, without touching the archive.
+    if args.outputs:
+        if worker_running(out_dir):
+            print("A worker is running; its next merge rebuilds master.csv anyway.")
+            print("Stop it first (dfrun --stop) if you want the Desktop files now.")
+            return 1
+        finish_outputs(out_dir, software_dir, force_merge=True,
+                       canonical_root=args.source)
+        return 0
 
     stage_banner()
 
@@ -2120,15 +2133,25 @@ def supervise(software_dir, source, out_dir, params, args):
         return
 
 
-def finish_outputs(out_dir, software_dir):
-    """Stage 7: write the Desktop outputs and build (and open) the dashboard."""
+def finish_outputs(out_dir, software_dir, force_merge=False, canonical_root=None):
+    """Stage 7: write the Desktop outputs and build (and open) the dashboard.
+
+    force_merge rebuilds master.csv even when one exists, which is what
+    --outputs needs after shard CSVs have been added, removed or re-derived
+    (the merge is where sequence_id and path normalisation are applied).
+    canonical_root overrides the archive root recorded by the last run, for
+    when the drive has since been remounted elsewhere.
+    """
+    root = canonical_root or recorded_archive_root(out_dir)
     print("Writing the spreadsheet-friendly outputs to the Desktop...")
     master = os.path.join(out_dir, MASTER_NAME)
-    if not os.path.exists(master):
-        dfb.merge_csvs(out_dir, master, canonical_root=recorded_archive_root(out_dir))
+    if force_merge or not os.path.exists(master):
+        n_files, n_rows = dfb.merge_csvs(out_dir, master, canonical_root=root)
+        print(f"  master.csv: {n_files:,} shards, {n_rows:,} rows"
+              + (f", paths under {root}" if root else ""))
     copy_file(master, os.path.join(DESKTOP_DIR, DESKTOP_MASTER))
     rows, capped, n_species, n_stations = write_wildlife_and_summary(
-        out_dir, DESKTOP_DIR, canonical_root=recorded_archive_root(out_dir)
+        out_dir, DESKTOP_DIR, canonical_root=root
     )
     print(f"  {DESKTOP_MASTER}: every image (too large for Excel; open in R)")
     print(f"  {DESKTOP_WILDLIFE}: {rows:,} wildlife rows" + (" (capped to Excel's limit)" if capped else ""))

@@ -205,16 +205,6 @@ tr.photorow td{background:var(--night2);white-space:normal}
   </div>
 </section>
 
-<!-- ================= STATS (from the loaded CSV, under the current filters) -->
-<div id="statsblock" hidden>
-<p class="thesis">Spread across a stretch of the Southern Carpathians in Romania, the cameras recorded
-<b id="th_img">&mdash;</b> between <b id="th_d0">&mdash;</b> and <b id="th_d1">&mdash;</b>. Most frames were empty; the rest
-hold <b id="th_det">&mdash;</b> across <span id="th_animal">&mdash;</span> kinds of animal, from squirrels and roe deer
-to bear, wolf and bison. This dashboard shows what moved through these mountains, where, and when,
-under the scope, thresholds and species filters you set below.</p>
-<div class="kpis" id="kpis"></div>
-</div>
-
 <!-- ================= 02 FILTERS ================= -->
 <section class="section off" id="p-filter">
   <div class="section-head"><span class="n">02</span><h2>Filters</h2>
@@ -297,6 +287,16 @@ under the scope, thresholds and species filters you set below.</p>
 </div>
 
 <div id="figs" hidden>
+
+<!-- ================= STATS (recomputed from the filters on every Generate) -->
+<div id="statsblock">
+<p class="thesis" style="margin-top:24px">Spread across a stretch of the Southern Carpathians in Romania, the cameras recorded
+<b id="th_img">&mdash;</b> between <b id="th_d0">&mdash;</b> and <b id="th_d1">&mdash;</b>. Most frames were empty; the rest
+hold <b id="th_det">&mdash;</b> across <span id="th_animal">&mdash;</span> kinds of animal, from squirrels and roe deer
+to bear, wolf and bison. This dashboard shows what moved through these mountains, where, and when,
+under the scope, thresholds and species filters set above.</p>
+<div class="kpis" id="kpis"></div>
+</div>
 
 <div class="duo">
 <!-- ================= 03 CAMERA GRID ================= -->
@@ -1081,7 +1081,6 @@ function buildDerived() {
 /* ============================ header + KPIs ============================= */
 function renderScalars() {
   const R = S.results;
-  $("statsblock").hidden = false;
   const stn = R.stations.size;
   const d0 = isFinite(R.d0) ? new Date(R.d0) : null, d1 = isFinite(R.d1) ? new Date(R.d1) : null;
   const years = d0 && d1 ? (d0.getFullYear() === d1.getFullYear()

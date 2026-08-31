@@ -223,6 +223,13 @@ so a disconnect can never be recorded as thousands of false "empty" images
 `--min-avail-gib` pause-under-pressure guard exists but is off by default.
 Protective stops record their reason in `status.p0.json` and the log.
 
+Rebuilding outputs on demand: `dfrun --outputs` regenerates `master.csv` and
+every Desktop file from the shard CSVs without reclassifying anything. Use it
+after adding or removing shard CSVs, or to apply derived columns (such as
+`sequence_id`) to results produced by an earlier version. Add
+`--source /path/to/archive` to set the root the image paths are normalised
+onto, when the drive has since been remounted elsewhere.
+
 ## Auto-resume service
 
 `dfrun --install-service` installs a systemd unit, `deepfaune-worker.service`,

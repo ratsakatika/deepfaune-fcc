@@ -239,11 +239,15 @@ timeline or by-month, with a click-through from ecological group to species),
 the what-the-cameras-saw species bars (events or photos, guild legend
 toggles) and the busiest-cameras bars, followed by the events table.
 
-When served from the out-dir (for example `python3 -m http.server 8000` next
-to the master file) it loads `deepfaune_master.csv` automatically, and picks
-up `FieldProtocols_WTM_FAR_23.xlsx` from the same folder to place the
-camera-grid map; opened any other way, choose or drag the files in (the map
-panel offers its own picker for the protocol). Because the `score_*` columns
+The survey statistics (thesis paragraph and KPI tiles) sit just below the
+load step and recompute from the loaded CSV on every Generate; the official
+survey / all images scope is a filter option alongside the thresholds. When
+served from the out-dir (for example `python3 -m http.server 8000` next to
+the master file) it loads `deepfaune_master.csv` automatically. The 2023
+field protocol's camera coordinates are embedded in the page, so the
+camera-grid map works out of the box; a `FieldProtocols_WTM_FAR_23.xlsx`
+next to the page, or one loaded via the map panel's picker, replaces the
+embedded set. Because the `score_*` columns
 hold the complete distribution over every animal class, it re-derives
 predictions rather than just filtering the ones already written: set a global
 or per-species confidence threshold (typed or by slider), require a minimum

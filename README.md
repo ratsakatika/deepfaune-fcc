@@ -251,8 +251,10 @@ not baked in: entering a gap re-reads the file and rechains photographs into
 events with the engine's own rule; blank keeps the original grouping), untick
 species that cannot occur so their detections fall to the next-best species,
 and switch scope between the official survey (Camera Trap
-Monitoring/Collections) and all images. Per-species minimum-length overrides
-in the species table drop events shorter than a given number of seconds. The
+Monitoring/Collections) and all images. Per-species gap overrides in the
+species table merge repeat detections of a species at the same camera within
+the given seconds into one event (an independence interval), re-scored from
+the combined photographs. The
 events table lists events oldest first, shows the top three species with
 scores to three decimal places (naming the top choice even when it scored
 below the threshold, shown in red rather than hidden behind "undefined"),

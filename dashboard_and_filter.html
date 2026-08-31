@@ -143,7 +143,7 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
 .sp-table th{position:sticky;top:0;background:var(--bark2);font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);padding:7px 10px;text-align:left;z-index:1}
 .sp-table td{padding:4px 10px;border-top:1px solid var(--line)}
 .sp-table td.num,.sp-table th.num{text-align:right}
-.sp-table .sp-thr,.sp-table .sp-len{width:88px;padding:4px 8px}
+.sp-table .sp-thr,.sp-table .sp-gap{width:88px;padding:4px 8px}
 tr.sp-off td{opacity:.42}
 .actionbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:26px;background:var(--bark);border:1px solid var(--line);border-radius:var(--r);padding:14px 18px}
 .actionbar .status{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--muted)}
@@ -278,8 +278,13 @@ tr.photorow td{background:var(--night2);white-space:normal}
     <details class="disc" id="spdetails">
       <summary>Species: candidates and per-species overrides</summary>
       <p class="lead" style="margin:12px 0 10px">Untick a species to exclude it: its detections fall
-      to the next-best candidate, exactly as if it had been excluded during classification &mdash;
-      and the decision stays reversible here. Blank override cells use the global values above.</p>
+      to the next-best candidate, and the decision stays reversible here. Note an unticked
+      species is not deleted from the results &mdash; its events land on the next-best species or on
+      &lsquo;undefined&rsquo;, which stay counted while their boxes are ticked. To view a single
+      species alone, also untick &lsquo;include events below the threshold&rsquo;, or use the
+      events table&rsquo;s Top&nbsp;1 filter. A <b>gap override</b> merges repeat detections of
+      that species at the same camera within the given seconds into one event (an independence
+      interval); blank means no merging.</p>
       <div class="checks" style="margin-bottom:10px">
         <button type="button" class="mini" id="sp-all">All species</button>
         <button type="button" class="mini" id="sp-none">None</button>
@@ -290,7 +295,7 @@ tr.photorow td{background:var(--night2);white-space:normal}
           <thead><tr>
             <th style="width:34px"></th><th>Species</th>
             <th class="num" style="width:120px">Threshold</th>
-            <th class="num" style="width:120px">Min seconds</th>
+            <th class="num" style="width:120px">Gap override (s)</th>
           </tr></thead>
           <tbody id="sptbody"></tbody>
         </table>
@@ -317,11 +322,7 @@ tr.photorow td{background:var(--night2);white-space:normal}
 <div id="statsblock" hidden>
 <p class="thesis" id="thesisWait" style="margin-top:24px">Loaded. Set the filters above, then press
 <b>Generate</b> to build the dashboard from them.</p>
-<p class="thesis" id="thesisFull" style="margin-top:24px" hidden>Spread across a stretch of the Southern Carpathians in Romania, the cameras recorded
-<b id="th_img">&mdash;</b> between <b id="th_d0">&mdash;</b> and <b id="th_d1">&mdash;</b>. Most frames were empty; the rest
-hold <b id="th_det">&mdash;</b> across <span id="th_animal">&mdash;</span> kinds of animal, from squirrels and roe deer
-to bear, wolf and bison. This dashboard shows what moved through these mountains, where, and when,
-under the scope, thresholds and species filters set above.</p>
+<p class="thesis" id="thesisFull" style="margin-top:24px" hidden></p>
 <div class="kpis" id="kpis"></div>
 </div>
 
@@ -500,8 +501,9 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
           event, so an event can last far longer than the gap when an animal lingers. Blank
           keeps the grouping baked in at classification; entering a number regroups the whole
           archive by re-reading the file, so Generate takes about as long as the original
-          load. The per-species &lsquo;min seconds&rsquo; boxes in the species table still let you
-          drop events shorter than a given length.</li>
+          load. The per-species <b>gap override</b> boxes in the species table go further:
+          repeat detections of that species at the same camera within the override merge into
+          one event (an independence interval), re-scored from the combined photographs.</li>
         <li><b>Scope</b> - the official survey is the drive's <i>Camera Trap
           Monitoring/Collections</i> folder; &lsquo;All images&rsquo; adds everything else on the
           drive. Out-of-scope events are counted in &lsquo;Events filtered out&rsquo;, which is why
@@ -518,7 +520,7 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
       <ul>
         <li><b>Events filtered out</b> - everything the current filters removed, with the
           reasons listed under the figure: outside the chosen scope, recycle-bin files,
-          excluded categories (empty / human / vehicle / below-threshold), or too short.</li>
+          excluded categories (empty / human / vehicle / below-threshold).</li>
         <li>An event is one photographic <b>sequence</b> (burst), so bursts are counted once.
           <code>sequence_id</code> is a short code for the folder plus the sequence number,
           because the plain sequence number restarts at 1 in every folder and is not unique.</li>
@@ -936,7 +938,7 @@ function buildSpeciesTable() {
       '<td><input type="checkbox" class="sp-on" data-j="' + j + '" checked aria-label="Include ' + esc(name) + '"></td>' +
       "<td>" + esc(name) + "</td>" +
       '<td class="num"><input type="number" class="sp-thr" data-j="' + j + '" min="0" max="1" step="0.01" placeholder="global"></td>' +
-      '<td class="num"><input type="number" class="sp-len" data-j="' + j + '" min="0" step="1" placeholder="global"></td>';
+      '<td class="num"><input type="number" class="sp-gap" data-j="' + j + '" min="0" step="1" placeholder="none" aria-label="Gap override for ' + esc(name) + '"></td>';
     tb.appendChild(tr);
   });
   tb.addEventListener("change", (e) => {
@@ -970,15 +972,14 @@ function readGap() {
 }
 function readFilters() {
   const gThr = Math.min(1, Math.max(0, +$("thrNum").value || 0));
-  const gLen = 0;   /* per-species min-seconds overrides only */
   const on = new Uint8Array(S.K).fill(0);
   const thr = new Float64Array(S.K).fill(gThr);
-  const len = new Float64Array(S.K).fill(gLen);   /* seconds, not image count */
+  const gapOv = new Float64Array(S.K);   /* per-species merge gap, seconds; 0 = off */
   document.querySelectorAll(".sp-on").forEach((cb) => { if (cb.checked) on[+cb.dataset.j] = 1; });
   document.querySelectorAll(".sp-thr").forEach((el) => { if (el.value !== "") thr[+el.dataset.j] = +el.value; });
-  document.querySelectorAll(".sp-len").forEach((el) => { if (el.value !== "") len[+el.dataset.j] = Math.max(0, +el.value || 0); });
+  document.querySelectorAll(".sp-gap").forEach((el) => { if (el.value !== "") gapOv[+el.dataset.j] = Math.max(0, +el.value || 0); });
   return {
-    on, thr, len, gLen,
+    on, thr, gapOv,
     incUndefined: $("inc-undefined").checked,
     incEmpty: $("inc-empty").checked,
     incHuman: $("inc-human").checked,
@@ -1042,6 +1043,100 @@ const isoDay = (ms) => {
   return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
 };
 
+/* Merged-event helpers: a merged event is represented by its first member's
+   index, with combined figures carried on the result object. */
+const evImgs = (i, r) => r.mImgs != null ? r.mImgs : S.nImg[i];
+const evAnimal = (i, r) => r.mA != null ? r.mA : S.nAnimal[i];
+const evHuman = (i, r) => r.mH != null ? r.mH : S.nHuman[i];
+const evVehicle = (i, r) => r.mV != null ? r.mV : S.nVehicle[i];
+const evT0 = (i, r) => r.mT0 != null ? r.mT0 : S.tMin[i];
+const evT1 = (i, r) => r.mT1 != null ? r.mT1 : S.tMax[i];
+function evSecs(i, r) {
+  const a = evT0(i, r), b = evT1(i, r);
+  return isFinite(a) && isFinite(b) ? (b - a) / 1000 : 0;
+}
+
+/* Per-species gap overrides: repeat detections of the same species at the
+   same camera folder, separated by no more than the override, merge into one
+   event (an ecological independence interval). The merged verdict is
+   re-derived from the combined image scores with the engine's own sequence
+   maths, exactly as if the photographs had been grouped together. */
+function reclassifyMerged(pr, F) {
+  const n = pr.mA;
+  const factor = T_IMAGE / (n > 1 ? T_SEQ : T_IMAGE);
+  let best = -1, bestA = -Infinity, second = -1, secondA = -Infinity, third = -1, thirdA = -Infinity;
+  let allMax = -Infinity;
+  for (let j = 0; j < S.K; j++) {
+    const a = (pr.mLogs[j] / n) * factor;
+    if (a > allMax) allMax = a;
+    if (!F.on[j]) continue;
+    if (a > bestA) { third = second; thirdA = secondA; second = best; secondA = bestA; best = j; bestA = a; }
+    else if (a > secondA) { third = second; thirdA = secondA; second = j; secondA = a; }
+    else if (a > thirdA) { third = j; thirdA = a; }
+  }
+  if (best < 0) return;
+  let sumAll = 0;
+  for (let j = 0; j < S.K; j++) sumAll += Math.exp(((pr.mLogs[j] / n) * factor) - allMax);
+  pr.score = Math.exp(bestA - allMax) / sumAll;
+  const pass = pr.score >= F.thr[best];
+  pr.top1 = S.classes[best];
+  pr.label = pass ? pr.top1 : "undefined";
+  pr.kind = pass ? "animal" : "undefined";
+  pr.cls = best;
+  pr.second = second >= 0 ? S.classes[second] : "";
+  pr.secondScore = second >= 0 ? Math.exp(secondA - allMax) / sumAll : 0;
+  pr.third = third >= 0 ? S.classes[third] : "";
+  pr.thirdScore = third >= 0 ? Math.exp(thirdA - allMax) / sumAll : 0;
+}
+function freshMergeable(i, r) {
+  const nr = Object.assign({}, r);
+  nr.mLogs = Float64Array.from(S.logs.subarray(i * S.K, i * S.K + S.K));
+  nr.mA = S.nAnimal[i]; nr.mH = S.nHuman[i]; nr.mV = S.nVehicle[i];
+  nr.mImgs = S.nImg[i]; nr.mT0 = S.tMin[i]; nr.mT1 = S.tMax[i];
+  nr.mN = 1; nr.mMembers = [i];
+  return nr;
+}
+function mergeInto(pr, i, F) {
+  const base = i * S.K;
+  for (let j = 0; j < S.K; j++) pr.mLogs[j] += S.logs[base + j];
+  pr.mA += S.nAnimal[i]; pr.mH += S.nHuman[i]; pr.mV += S.nVehicle[i];
+  pr.mImgs += S.nImg[i];
+  if (S.tMin[i] < pr.mT0) pr.mT0 = S.tMin[i];
+  if (S.tMax[i] > pr.mT1) pr.mT1 = S.tMax[i];
+  pr.mN++; pr.mMembers.push(i);
+  reclassifyMerged(pr, F);
+}
+function mergeBySpeciesGap(kept, F) {
+  let any = false;
+  for (let j = 0; j < S.K; j++) { if (F.gapOv[j] > 0) { any = true; break; } }
+  if (!any) return kept;
+  const out = [];
+  let lastDir = null, lastByLabel = new Map();
+  for (let k = 0; k < kept.length; k += 2) {
+    const i = kept[k], r = kept[k + 1];
+    const dir = eventDir(i);
+    if (dir !== lastDir) { lastByLabel = new Map(); lastDir = dir; }
+    const ov = r.kind === "animal" && r.cls != null ? F.gapOv[r.cls] : 0;
+    if (ov > 0) {
+      const pos = lastByLabel.get(r.label);
+      if (pos !== undefined) {
+        const pr = out[pos];
+        const gapMs = S.tMin[i] - pr.mT1;
+        if (isFinite(gapMs) && gapMs >= 0 && gapMs <= ov * 1000) {
+          mergeInto(pr, i, F);
+          continue;
+        }
+      }
+      const nr = freshMergeable(i, r);
+      out.push(i); out.push(nr);
+      lastByLabel.set(r.label, out.length - 1);
+      continue;
+    }
+    out.push(i); out.push(r);
+  }
+  return out;
+}
+
 async function generate() {
   if (!S.loaded) return;
   const wantGap = readGap();
@@ -1053,20 +1148,21 @@ async function generate() {
   $("genprog").hidden = false;
   setBar("genbar", 0);
   const t0 = performance.now();
-  const out = [];
   const A = {
     bySpecies: new Map(), imgBySpecies: new Map(), scoreSum: new Map(),
     stations: new Map(),
     clock: new Map(), clockWild: new Int32Array(24), clockWhv: new Int32Array(24),
     weekly: new Map(), weeklySp: new Map(), monthly: new Map(), monthlySp: new Map(),
     wkMin: Infinity, wkMax: -Infinity, d0: Infinity, d1: -Infinity,
-    images: 0, nonEmpty: 0, wildN: 0, whvN: 0, badDates: 0,
+    images: 0, nonEmpty: 0, named: 0, wildN: 0, whvN: 0, badDates: 0,
     droppedBy: { "outside scope": 0, "recycle bin": 0, "empty": 0, "human": 0,
-                 "vehicle": 0, "below threshold": 0, "too short": 0 },
+                 "vehicle": 0, "below threshold": 0 },
   };
   let dropped = 0;
   const drop = (why) => { dropped++; A.droppedBy[why]++; };
 
+  /* Phase 1: classify every event and apply the scope and category filters. */
+  const kept = [];
   const CHUNK = 20000;
   for (let start = 0; start < S.n; start += CHUNK) {
     const end = Math.min(S.n, start + CHUNK);
@@ -1078,85 +1174,93 @@ async function generate() {
       if (r.kind === "human" && !F.incHuman) { drop("human"); continue; }
       if (r.kind === "vehicle" && !F.incVehicle) { drop("vehicle"); continue; }
       if (r.kind === "undefined" && !F.incUndefined) { drop("below threshold"); continue; }
-      const need = r.cls != null && r.kind === "animal" ? F.len[r.cls] : F.gLen;
-      if (need > 0 && seqSeconds(i) < need) { drop("too short"); continue; }
-
-      out.push(i); out.push(r);
-      A.images += S.nImg[i];
-      const label = r.label;
-      A.bySpecies.set(label, (A.bySpecies.get(label) || 0) + 1);
-      A.imgBySpecies.set(label, (A.imgBySpecies.get(label) || 0) + S.nImg[i]);
-      const datedMin = plausibleDate(S.tMin[i]);
-      if (datedMin) {
-        if (S.tMin[i] < A.d0) A.d0 = S.tMin[i];
-        if (plausibleDate(S.tMax[i]) && S.tMax[i] > A.d1) A.d1 = S.tMax[i];
-      }
-
-      const stid = S.wtm[i] || S.station[i] || "(unknown)";
-      let st = A.stations.get(stid);
-      if (!st) { st = { segs: new Int32Array(GORDER.length), tot: 0, sp: new Map(),
-                        seqs: 0, dtMax: -Infinity, scoreSum: 0, scoreN: 0 }; A.stations.set(stid, st); }
-      st.seqs++;
-      if (datedMin && S.tMax[i] > st.dtMax) st.dtMax = S.tMax[i];
-
-      if (r.kind === "empty") continue;   /* empty events count as sequences only */
-      A.nonEmpty++;
-      const g = guildOf(label);
-      const isWild = WILD_G.indexOf(g) !== -1;
-      const isWhv = isWild || label === "human" || label === "vehicle";
-      if (isWild) A.wildN++;
-      if (isWhv) A.whvN++;
-      st.segs[GIDX[g]]++; st.tot++;
-      st.sp.set(label, (st.sp.get(label) || 0) + 1);
-      st.scoreSum += r.score; st.scoreN++;
-      A.scoreSum.set(label, (A.scoreSum.get(label) || 0) + r.score);
-
-      if (!datedMin) { A.badDates++; continue; }
-      const d = new Date(S.tMin[i]);
-      let hr = A.clock.get(label);
-      if (!hr) { hr = new Int32Array(24); A.clock.set(label, hr); }
-      hr[d.getHours()]++;
-      if (isWild) A.clockWild[d.getHours()]++;
-      if (isWhv) A.clockWhv[d.getHours()]++;
-      const wk = weekStartMs(d);
-      if (wk < A.wkMin) A.wkMin = wk;
-      if (wk > A.wkMax) A.wkMax = wk;
-      let wg = A.weekly.get(g);
-      if (!wg) { wg = new Map(); A.weekly.set(g, wg); }
-      wg.set(wk, (wg.get(wk) || 0) + 1);
-      let wsg = A.weeklySp.get(g);
-      if (!wsg) { wsg = new Map(); A.weeklySp.set(g, wsg); }
-      let wsp = wsg.get(label);
-      if (!wsp) { wsp = new Map(); wsg.set(label, wsp); }
-      wsp.set(wk, (wsp.get(wk) || 0) + 1);
-      let mg = A.monthly.get(g);
-      if (!mg) { mg = new Int32Array(12); A.monthly.set(g, mg); }
-      mg[d.getMonth()]++;
-      let msg = A.monthlySp.get(g);
-      if (!msg) { msg = new Map(); A.monthlySp.set(g, msg); }
-      let msp = msg.get(label);
-      if (!msp) { msp = new Int32Array(12); msg.set(label, msp); }
-      msp[d.getMonth()]++;
+      kept.push(i); kept.push(r);
     }
     const frac = end / S.n;
-    setBar("genbar", frac * 100);
+    setBar("genbar", frac * 90);
     const rate = end / ((performance.now() - t0) / 1000);
     $("genmsg").textContent = fmt(end) + " of " + fmt(S.n) + " events";
     $("geneta").textContent = frac < 0.99 ? humanTime((S.n - end) / rate) + " left" : "";
     await new Promise((r) => requestAnimationFrame(r));
   }
 
+  /* Phase 2: per-species gap overrides merge repeat detections. */
+  const out = mergeBySpeciesGap(kept, F);
+  const mergedAway = (kept.length - out.length) / 2;
+
+  /* Phase 3: accumulate every panel's numbers over the final events. */
+  for (let k = 0; k < out.length; k += 2) {
+    const i = out[k], r = out[k + 1];
+    const nImg = evImgs(i, r), eT0 = evT0(i, r), eT1 = evT1(i, r);
+    A.images += nImg;
+    const label = r.label;
+    A.bySpecies.set(label, (A.bySpecies.get(label) || 0) + 1);
+    A.imgBySpecies.set(label, (A.imgBySpecies.get(label) || 0) + nImg);
+    const datedMin = plausibleDate(eT0);
+    if (datedMin) {
+      if (eT0 < A.d0) A.d0 = eT0;
+      if (plausibleDate(eT1) && eT1 > A.d1) A.d1 = eT1;
+    }
+
+    const stid = S.wtm[i] || S.station[i] || "(unknown)";
+    let st = A.stations.get(stid);
+    if (!st) { st = { segs: new Int32Array(GORDER.length), tot: 0, sp: new Map(),
+                      seqs: 0, dtMax: -Infinity, scoreSum: 0, scoreN: 0 }; A.stations.set(stid, st); }
+    st.seqs++;
+    if (datedMin && eT1 > st.dtMax) st.dtMax = eT1;
+
+    if (r.kind === "empty") continue;   /* empty events count as sequences only */
+    A.nonEmpty++;
+    if (r.kind === "animal") A.named++;
+    const g = guildOf(label);
+    const isWild = WILD_G.indexOf(g) !== -1;
+    const isWhv = isWild || label === "human" || label === "vehicle";
+    if (isWild) A.wildN++;
+    if (isWhv) A.whvN++;
+    st.segs[GIDX[g]]++; st.tot++;
+    st.sp.set(label, (st.sp.get(label) || 0) + 1);
+    st.scoreSum += r.score; st.scoreN++;
+    A.scoreSum.set(label, (A.scoreSum.get(label) || 0) + r.score);
+
+    if (!datedMin) { A.badDates++; continue; }
+    const d = new Date(eT0);
+    let hr = A.clock.get(label);
+    if (!hr) { hr = new Int32Array(24); A.clock.set(label, hr); }
+    hr[d.getHours()]++;
+    if (isWild) A.clockWild[d.getHours()]++;
+    if (isWhv) A.clockWhv[d.getHours()]++;
+    const wk = weekStartMs(d);
+    if (wk < A.wkMin) A.wkMin = wk;
+    if (wk > A.wkMax) A.wkMax = wk;
+    let wg = A.weekly.get(g);
+    if (!wg) { wg = new Map(); A.weekly.set(g, wg); }
+    wg.set(wk, (wg.get(wk) || 0) + 1);
+    let wsg = A.weeklySp.get(g);
+    if (!wsg) { wsg = new Map(); A.weeklySp.set(g, wsg); }
+    let wsp = wsg.get(label);
+    if (!wsp) { wsp = new Map(); wsg.set(label, wsp); }
+    wsp.set(wk, (wsp.get(wk) || 0) + 1);
+    let mg = A.monthly.get(g);
+    if (!mg) { mg = new Int32Array(12); A.monthly.set(g, mg); }
+    mg[d.getMonth()]++;
+    let msg = A.monthlySp.get(g);
+    if (!msg) { msg = new Map(); A.monthlySp.set(g, msg); }
+    let msp = msg.get(label);
+    if (!msp) { msp = new Int32Array(12); msg.set(label, msp); }
+    msp[d.getMonth()]++;
+  }
+
   /* oldest first; wrong-clock (1970) dates sort first by that rule, undated last */
   {
     const nk = out.length / 2, ord = [];
     for (let k = 0; k < nk; k++) ord.push(k);
-    ord.sort((a, b) => S.tMin[out[a * 2]] - S.tMin[out[b * 2]]);
+    ord.sort((a, b) => evT0(out[a * 2], out[a * 2 + 1]) - evT0(out[b * 2], out[b * 2 + 1]));
     const sorted = new Array(out.length);
-    ord.forEach((k, j) => { sorted[j * 2] = out[k * 2]; sorted[j * 2 + 1] = out[k * 2 + 1]; });
-    for (let j = 0; j < out.length; j++) out[j] = sorted[j];
+    ord.forEach((k, jj) => { sorted[jj * 2] = out[k * 2]; sorted[jj * 2 + 1] = out[k * 2 + 1]; });
+    for (let jj = 0; jj < out.length; jj++) out[jj] = sorted[jj];
   }
   const events = out.length / 2;
-  S.results = Object.assign({ pairs: out, events, dropped, F }, A);
+  S.results = Object.assign({ pairs: out, events, dropped, mergedAway, F }, A);
   setBar("genbar", 100);
   $("genmsg").textContent = fmt(events) + " events kept";
   $("geneta").textContent = "in " + humanTime((performance.now() - t0) / 1000);
@@ -1167,7 +1271,9 @@ async function generate() {
   $("download-img").disabled = events === 0 || !S.src;
   $("dl-summary").disabled = events === 0;
   $("actionstatus").textContent = events
-    ? "Generated. Downloads are ready."
+    ? fmt(events) + " events kept · " + fmt(A.named) + " named species events" +
+      (mergedAway ? " · " + fmt(mergedAway) + " merged by gap overrides" : "") +
+      ". Downloads are ready."
     : "No events matched these filters — try relaxing the threshold.";
   $("resstamp").textContent = "threshold " + (+$("thrNum").value).toFixed(2) +
     " · " + document.querySelectorAll(".sp-on:checked").length + " species";
@@ -1309,11 +1415,17 @@ function renderScalars() {
   const nAnimalTypes = SPECIES.length;
   $("th_stn").textContent = stn;
   $("th_years").textContent = years;
-  $("th_img").textContent = fmt(R.images) + " photographs";
-  $("th_d0").textContent = d0 ? fmtMonY(d0) : "—";
-  $("th_d1").textContent = d1 ? fmtMonY(d1) : "—";
-  $("th_det").textContent = fmt(R.nonEmpty) + " animal and human detections";
-  $("th_animal").textContent = nAnimalTypes;
+  const B = (v) => "<b>" + v + "</b>";
+  const plural = (n, one, many) => fmt(n) + " " + (n === 1 ? one : many);
+  $("thesisFull").innerHTML =
+    "The current filters keep " + B(plural(R.events, "detection event", "detection events")) +
+    ", covering " + B(fmt(R.images) + " photographs") + ". " +
+    B(fmt(R.nonEmpty)) + " of the events contain animals, people or vehicles; " +
+    B(fmt(R.named)) + " carry a species name, spanning " +
+    B(plural(nAnimalTypes, "animal species", "animal species")) + " and " +
+    B(plural(stn, "camera station", "camera stations")) +
+    (d0 && d1 ? ", recorded between " + B(fmtMonY(d0)) + " and " + B(fmtMonY(d1)) : "") +
+    ". " + fmt(R.dropped) + " events are filtered out (reasons under the tile below).";
   const why = Object.entries(R.droppedBy).filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1]).map(([k, v]) => k + " " + fmt(v)).join(" · ");
   const KPI = [
@@ -1752,8 +1864,9 @@ function renderAll() {
    apply to the table view only; the CSV downloads always carry the full
    generated results. */
 var TBL = { size: 50, page: 0, filters: { sp: "", score: "", t2: "", t3: "", img: "", len: "", st: "", date: "" }, idx: null };
-function eventWhen(i) {
-  return isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 16).replace("T", " ") : "—";
+function eventWhen(i, r) {
+  const t = evT0(i, r);
+  return isFinite(t) ? new Date(t).toISOString().slice(0, 16).replace("T", " ") : "—";
 }
 function tableIndex() {
   if (TBL.idx) return TBL.idx;
@@ -1769,10 +1882,10 @@ function tableIndex() {
     if (minScore >= 0 && !(r.score >= minScore)) continue;
     if (t2 && (r.second || "").toLowerCase().indexOf(t2) === -1) continue;
     if (t3 && (r.third || "").toLowerCase().indexOf(t3) === -1) continue;
-    if (minImg >= 0 && !(S.nImg[i] >= minImg)) continue;
-    if (minLen >= 0 && !(seqSeconds(i) >= minLen)) continue;
+    if (minImg >= 0 && !(evImgs(i, r) >= minImg)) continue;
+    if (minLen >= 0 && !(evSecs(i, r) >= minLen)) continue;
     if (st && S.station[i].toLowerCase().indexOf(st) === -1) continue;
-    if (dt && eventWhen(i).toLowerCase().indexOf(dt) === -1) continue;
+    if (dt && eventWhen(i, r).toLowerCase().indexOf(dt) === -1) continue;
     out.push(k);
   }
   TBL.idx = out;
@@ -1804,10 +1917,10 @@ function renderTable() {
       '<td class="num">' + r.score.toFixed(3) + "</td>" +
       '<td class="num tmuted">' + (r.second ? esc(r.second) + " " + r.secondScore.toFixed(3) : "—") + "</td>" +
       '<td class="num tmuted">' + (r.third ? esc(r.third) + " " + r.thirdScore.toFixed(3) : "—") + "</td>" +
-      '<td class="num">' + S.nImg[i] + "</td>" +
-      '<td class="num">' + fmtSecs(seqSeconds(i)) + "</td>" +
+      '<td class="num">' + evImgs(i, r) + (r.mN > 1 ? ' <span class="tmuted">(' + r.mN + " merged)</span>" : "") + "</td>" +
+      '<td class="num">' + fmtSecs(evSecs(i, r)) + "</td>" +
       "<td>" + esc(S.station[i]) + "</td>" +
-      '<td class="num">' + eventWhen(i) + "</td>";
+      '<td class="num">' + eventWhen(i, r) + "</td>";
     frag.appendChild(tr);
   }
   tb.appendChild(frag);
@@ -1928,14 +2041,14 @@ function downloadCsv() {
   for (let k = 0; k < R.events; k++) {
     const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
     buf += [
-      csvCell(S.firstFile[i]), fmtExif(S.tMin[i]),
+      csvCell(S.firstFile[i]), fmtExif(evT0(i, r)),
       csvCell(r.label), csvCell(r.top1 || r.label), r.score.toFixed(4),
       r.kind === "undefined" ? "no" : "yes",
       csvCell(r.second || ""), r.second ? r.secondScore.toFixed(4) : "",
       csvCell(r.third || ""), r.third ? r.thirdScore.toFixed(4) : "",
-      Math.round(seqSeconds(i)), S.nImg[i], S.nAnimal[i], S.nHuman[i], S.nVehicle[i],
-      csvCell(S.station[i]), fmtExif(S.tMax[i]),
-      csvCell(S.id[i]),
+      Math.round(evSecs(i, r)), evImgs(i, r), evAnimal(i, r), evHuman(i, r), evVehicle(i, r),
+      csvCell(S.station[i]), fmtExif(evT1(i, r)),
+      csvCell(S.id[i] + (r.mN > 1 ? "+" + (r.mN - 1) : "")),
     ].join(",") + "\n";
     if (buf.length > 1 << 20) { parts.push(buf); buf = ""; }
   }
@@ -1953,7 +2066,11 @@ async function downloadImagesCsv() {
   const R = S.results;
   if (!R || !S.src) return;
   const kept = new Array(S.n);
-  for (let k = 0; k < R.events; k++) kept[R.pairs[k * 2]] = R.pairs[k * 2 + 1];
+  for (let k = 0; k < R.events; k++) {
+    const r = R.pairs[k * 2 + 1];
+    if (r.mMembers) r.mMembers.forEach((m) => { kept[m] = r; });
+    else kept[R.pairs[k * 2]] = r;
+  }
   let reader, total = 0;
   try {
     if (S.src.file) { reader = S.src.file.stream().getReader(); total = S.src.file.size; }

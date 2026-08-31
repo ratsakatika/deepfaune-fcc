@@ -34,6 +34,7 @@ h1 .em{color:var(--sodium)}
 .kpi .v{font-family:'IBM Plex Mono',monospace;font-size:25px;font-weight:500;letter-spacing:-.02em;line-height:1}
 .kpi .v small{color:var(--muted);font-size:12px}
 .kpi .k{font-size:11px;color:var(--muted);margin-top:7px;letter-spacing:.03em}
+.kpi .s{font-size:10px;color:var(--faint);margin-top:5px;line-height:1.45}
 .section{margin-top:42px}
 .section-head{display:flex;align-items:baseline;gap:14px;margin-bottom:16px}
 .section-head .n{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--sodium);padding-top:2px}
@@ -173,6 +174,17 @@ tr.photorow td{background:var(--night2);white-space:normal}
   border:1px solid var(--line2);border-radius:6px;padding:4px 7px;
   font-family:'IBM Plex Mono',monospace;font-size:11px}
 .filterrow input::placeholder{color:var(--faint)}
+#helpov{position:fixed;inset:0;background:rgba(5,9,7,.74);z-index:80;display:flex;align-items:center;justify-content:center;padding:18px}
+#helpov[hidden]{display:none}
+.helpbox{background:var(--bark);border:1px solid var(--line2);border-radius:var(--r);max-width:840px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.55)}
+.helphead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line)}
+.helphead h2{font-size:17px}
+.helpbody{padding:4px 22px 22px;overflow-y:auto;font-size:13.5px;color:var(--muted);line-height:1.6}
+.helpbody h3{color:var(--mist);font-size:14px;margin:18px 0 6px}
+.helpbody b{color:var(--mist)}
+.helpbody ul{padding-left:20px;margin:6px 0}
+.helpbody li{margin:4px 0}
+.helpbody code{font-family:'IBM Plex Mono',monospace;font-size:12px;background:var(--night2);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
 @media (min-width:1080px){
  .duo{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start}
  .duo .section{margin-top:42px}
@@ -190,7 +202,10 @@ tr.photorow td{background:var(--night2);white-space:normal}
 </head>
 <body><div class="wrap">
 
-<div class="eyebrow"><span class="pdot"></span>Wildlife camera-trap survey &middot; F&#259;g&#259;ra&#537; Mountains, Romania &middot; <span id="th_years">&mdash;</span></div>
+<div style="display:flex;align-items:flex-start;gap:14px">
+  <div class="eyebrow"><span class="pdot"></span>Wildlife camera-trap survey &middot; F&#259;g&#259;ra&#537; Mountains, Romania &middot; <span id="th_years">&mdash;</span></div>
+  <button class="mini" id="helpbtn" style="margin-left:auto">Help</button>
+</div>
 <h1><span id="th_stn">&mdash;</span> cameras across the<br><span class="em">F&#259;g&#259;ra&#537; Mountains</span>.</h1>
 
 <!-- ================= 01 LOAD ================= -->
@@ -230,14 +245,15 @@ tr.photorow td{background:var(--night2);white-space:normal}
         </div>
         <div class="sub">Events scoring below this are labelled <i>undefined</i>.</div>
         <div class="checks" style="margin-top:8px">
-          <label><input type="checkbox" id="inc-undefined" checked> keep below-threshold events</label>
+          <label><input type="checkbox" id="inc-undefined" checked> include events below the threshold (labelled &lsquo;undefined&rsquo;)</label>
         </div>
       </div>
       <div class="field">
         <span class="lbl">Minimum sequence length (seconds)</span>
         <input type="number" id="minlen" min="0" step="1" value="0" aria-label="Minimum sequence length in seconds">
         <div class="sub">Elapsed time from the first to the last photograph in the
-        event. A single-photograph event is 0 seconds.</div>
+        event; 0 keeps every event. (This is a viewing filter, unrelated to the
+        60-second grouping gap used when the archive was classified.)</div>
       </div>
       <div class="field" id="scopebar">
         <span class="lbl">Scope</span>
@@ -295,17 +311,19 @@ tr.photorow td{background:var(--night2);white-space:normal}
   </div>
 </div>
 
-<div id="figs" hidden>
-
 <!-- ================= STATS (recomputed from the filters on every Generate) -->
-<div id="statsblock">
-<p class="thesis" style="margin-top:24px">Spread across a stretch of the Southern Carpathians in Romania, the cameras recorded
+<div id="statsblock" hidden>
+<p class="thesis" id="thesisWait" style="margin-top:24px">Loaded. Set the filters above, then press
+<b>Generate</b> to build the dashboard from them.</p>
+<p class="thesis" id="thesisFull" style="margin-top:24px" hidden>Spread across a stretch of the Southern Carpathians in Romania, the cameras recorded
 <b id="th_img">&mdash;</b> between <b id="th_d0">&mdash;</b> and <b id="th_d1">&mdash;</b>. Most frames were empty; the rest
 hold <b id="th_det">&mdash;</b> across <span id="th_animal">&mdash;</span> kinds of animal, from squirrels and roe deer
 to bear, wolf and bison. This dashboard shows what moved through these mountains, where, and when,
 under the scope, thresholds and species filters set above.</p>
 <div class="kpis" id="kpis"></div>
 </div>
+
+<div id="figs" hidden>
 
 <div class="duo">
 <!-- ================= 03 CAMERA GRID ================= -->
@@ -457,6 +475,90 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
 </footer>
 
 </div><!-- /wrap -->
+
+<!-- ================= HELP OVERLAY ================= -->
+<div id="helpov" hidden>
+  <div class="helpbox" role="dialog" aria-label="Help">
+    <div class="helphead"><h2>How this page works</h2><button class="mini" id="helpclose">Close</button></div>
+    <div class="helpbody">
+      <p>This page reads the master results file in your browser (nothing is uploaded) and
+      rebuilds the whole dashboard from whatever filters you set. Because the classifier's raw
+      score for <b>every</b> species is recorded for every image, predictions are re-derived on
+      the spot: thresholds and species choices apply retrospectively to the whole archive,
+      reversibly, without reclassifying anything.</p>
+
+      <h3>The filters</h3>
+      <ul>
+        <li><b>Confidence threshold</b> - an event whose best species score is below this is
+          labelled &lsquo;undefined&rsquo; instead of a species name. The companion tick box decides
+          whether those undefined events stay in the results (shown in red in the table, and in
+          the grey &lsquo;unidentified&rsquo; group in the charts) or are dropped entirely.</li>
+        <li><b>Minimum sequence length</b> - drops events shorter than this many seconds;
+          0 keeps everything. It is unrelated to the 60-second grouping gap used at
+          classification: that gap chains photos into events (an event can last far longer than
+          the gap, because a lingering animal keeps re-triggering the camera); this filter
+          merely hides short events from the results.</li>
+        <li><b>Scope</b> - the official survey is the drive's <i>Camera Trap
+          Monitoring/Collections</i> folder; &lsquo;All images&rsquo; adds everything else on the
+          drive. Out-of-scope events are counted in &lsquo;Events filtered out&rsquo;, which is why
+          that figure is large even with every other filter relaxed.</li>
+        <li><b>Species tick boxes</b> - an unticked species can never be named: events whose
+          best guess was that species fall to their next-best candidate. Scores are always the
+          model's confidence measured against <b>all</b> species it knows, so unticking species
+          never inflates the survivors' scores, and ticking more species can only ever name
+          more events, never fewer. Ticking a single species answers &lsquo;how sure was the model
+          it was X?&rsquo; for every animal event - expect very few to pass a high threshold.</li>
+      </ul>
+
+      <h3>The numbers</h3>
+      <ul>
+        <li><b>Events filtered out</b> - everything the current filters removed, with the
+          reasons listed under the figure: outside the chosen scope, recycle-bin files,
+          excluded categories (empty / human / vehicle / below-threshold), or too short.</li>
+        <li>An event is one photographic <b>sequence</b> (burst), so bursts are counted once.
+          <code>sequence_id</code> is a short code for the folder plus the sequence number,
+          because the plain sequence number restarts at 1 in every folder and is not unique.</li>
+        <li>Events with an implausible date (a dead camera clock stamping 1970) are counted in
+          the totals and station panels but left off the time charts.</li>
+      </ul>
+
+      <h3>The panels</h3>
+      <ul>
+        <li><b>The camera grid</b> - each circle is a camera at its real position (the 2023
+          field protocol is built into this page; a protocol file can replace it). Choose a
+          species to size the circles by its detections; tap a circle for detail.</li>
+        <li><b>Daily rhythm</b> - detections by hour of day; midnight at the top, the shaded
+          half is night. Only events with a usable time are counted.</li>
+        <li><b>Through the seasons</b> - weekly timeline or by-month calendar, stacked by
+          ecological group; click a group in the legend to split it into species.</li>
+        <li><b>What the cameras saw / Busiest cameras</b> - species and station totals; click a
+          group in the legend to hide or show it.</li>
+        <li><b>Events</b> - every surviving event, oldest first, pageable, with filter boxes
+          under each column heading (text matches anywhere; number boxes are minimums; these
+          affect the table only). Click a row to preview its photographs when the image files
+          are reachable from where the page is opened.</li>
+      </ul>
+
+      <h3>Saving results</h3>
+      <ul>
+        <li><b>Download events CSV</b> - one row per surviving event, with the master file's
+          column names (<code>prediction_seq</code>, <code>top1_seq</code>, <code>score_seq</code>,
+          <code>above_threshold</code>...) plus second and third choices and event extras.</li>
+        <li><b>Download images CSV</b> - re-reads the master and writes only the rows of
+          surviving events, with exactly the master's columns; the sequence-level verdict
+          columns are refreshed to match the current filters.</li>
+        <li><b>Save species summary</b> - species, group, events, images and mean confidence.</li>
+        <li>Each figure saves as an image (PNG, and SVG for the rhythm ring).</li>
+      </ul>
+
+      <h3>Sharing and phones</h3>
+      <p>On the survey computer run <code>cd ~/Desktop && python3 -m http.server 8000</code>, then
+      open <code>http://&lt;computer-ip&gt;:8000/dashboard_and_filter.html</code> on a phone on the
+      same network: the master file loads automatically. The seasonal chart and the map background
+      need an internet connection the first time; everything else works offline.</p>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"></script>
@@ -749,8 +851,8 @@ async function loadFrom(reader, totalBytes, label, src) {
   buildSpeciesTable();
   enable("p-filter"); enable("actions");
   $("actionstatus").textContent = "Ready. Set your filters, then press Generate.";
+  renderStatsPlaceholder();
   invalidate();
-  generate();   /* first render with the default filters, like the original dashboard */
 }
 
 function setBar(id, p) { $(id).style.width = Math.max(0, Math.min(100, p)) + "%"; }
@@ -831,30 +933,37 @@ function classify(i, F) {
   }
   const base = i * S.K, n = S.nAnimal[i];
   const factor = T_IMAGE / (n > 1 ? T_SEQ : T_IMAGE);
+  /* Scores are the softmax over ALL classes: an unticked species can never be
+     chosen, but its probability mass is not handed to the survivors. (The
+     engine's own exclusion renormalises over the remaining classes, which
+     inflates scores - with a single candidate to 1.0 exactly - so unticking
+     species here deliberately keeps the honest, un-inflated confidence:
+     with nothing unticked the two are identical.) */
   let best = -1, bestA = -Infinity, second = -1, secondA = -Infinity, third = -1, thirdA = -Infinity;
+  let allMax = -Infinity;
   for (let j = 0; j < S.K; j++) {
-    if (!F.on[j]) continue;
     const a = (S.logs[base + j] / n) * factor;
+    if (a > allMax) allMax = a;
+    if (!F.on[j]) continue;
     if (a > bestA) { third = second; thirdA = secondA; second = best; secondA = bestA; best = j; bestA = a; }
     else if (a > secondA) { third = second; thirdA = secondA; second = j; secondA = a; }
     else if (a > thirdA) { third = j; thirdA = a; }
   }
   if (best < 0) return { label: "undefined", score: 0, kind: "undefined" };
-  let sum = 0;
+  let sumAll = 0;
   for (let j = 0; j < S.K; j++) {
-    if (!F.on[j]) continue;
-    sum += Math.exp(((S.logs[base + j] / n) * factor) - bestA);
+    sumAll += Math.exp(((S.logs[base + j] / n) * factor) - allMax);
   }
-  const score = 1 / sum;
+  const score = Math.exp(bestA - allMax) / sumAll;
   const pass = score >= F.thr[best];
   return {
     label: pass ? S.classes[best] : "undefined",
     top1: S.classes[best], score, kind: pass ? "animal" : "undefined",
     cls: best,
     second: second >= 0 ? S.classes[second] : "",
-    secondScore: second >= 0 ? Math.exp(secondA - bestA) * score : 0,
+    secondScore: second >= 0 ? Math.exp(secondA - allMax) / sumAll : 0,
     third: third >= 0 ? S.classes[third] : "",
-    thirdScore: third >= 0 ? Math.exp(thirdA - bestA) * score : 0,
+    thirdScore: third >= 0 ? Math.exp(thirdA - allMax) / sumAll : 0,
   };
 }
 
@@ -882,22 +991,25 @@ async function generate() {
     weekly: new Map(), weeklySp: new Map(), monthly: new Map(), monthlySp: new Map(),
     wkMin: Infinity, wkMax: -Infinity, d0: Infinity, d1: -Infinity,
     images: 0, nonEmpty: 0, wildN: 0, whvN: 0, badDates: 0,
+    droppedBy: { "outside scope": 0, "recycle bin": 0, "empty": 0, "human": 0,
+                 "vehicle": 0, "below threshold": 0, "too short": 0 },
   };
   let dropped = 0;
+  const drop = (why) => { dropped++; A.droppedBy[why]++; };
 
   const CHUNK = 20000;
   for (let start = 0; start < S.n; start += CHUNK) {
     const end = Math.min(S.n, start + CHUNK);
     for (let i = start; i < end; i++) {
-      if (S.flags[i] & 2) { dropped++; continue; }                 /* recycle bin: neither scope */
-      if (SCOPE === "survey" && S.hasColl && !(S.flags[i] & 1)) { dropped++; continue; }
+      if (S.flags[i] & 2) { drop("recycle bin"); continue; }       /* neither scope */
+      if (SCOPE === "survey" && S.hasColl && !(S.flags[i] & 1)) { drop("outside scope"); continue; }
       const r = classify(i, F);
-      if (r.kind === "empty" && !F.incEmpty) { dropped++; continue; }
-      if (r.kind === "human" && !F.incHuman) { dropped++; continue; }
-      if (r.kind === "vehicle" && !F.incVehicle) { dropped++; continue; }
-      if (r.kind === "undefined" && !F.incUndefined) { dropped++; continue; }
+      if (r.kind === "empty" && !F.incEmpty) { drop("empty"); continue; }
+      if (r.kind === "human" && !F.incHuman) { drop("human"); continue; }
+      if (r.kind === "vehicle" && !F.incVehicle) { drop("vehicle"); continue; }
+      if (r.kind === "undefined" && !F.incUndefined) { drop("below threshold"); continue; }
       const need = r.cls != null && r.kind === "animal" ? F.len[r.cls] : F.gLen;
-      if (need > 0 && seqSeconds(i) < need) { dropped++; continue; }
+      if (need > 0 && seqSeconds(i) < need) { drop("too short"); continue; }
 
       out.push(i); out.push(r);
       A.images += S.nImg[i];
@@ -1108,8 +1220,18 @@ function buildDerived() {
 }
 
 /* ============================ header + KPIs ============================= */
+function renderStatsPlaceholder() {
+  $("statsblock").hidden = false;
+  $("thesisWait").hidden = false;
+  $("thesisFull").hidden = true;
+  const KPI = ["Images in kept events", "Photo sequences", "Animal &amp; human detections",
+    "Camera stations", "Animal types", "Events filtered out"];
+  $("kpis").innerHTML = KPI.map((k, i) =>
+    '<div class="kpi' + (i % 2 ? " alt" : "") + '"><div class="v">&mdash;</div><div class="k">' + k + "</div></div>").join("");
+}
 function renderScalars() {
   const R = S.results;
+  $("statsblock").hidden = false;
   const stn = R.stations.size;
   const d0 = isFinite(R.d0) ? new Date(R.d0) : null, d1 = isFinite(R.d1) ? new Date(R.d1) : null;
   const years = d0 && d1 ? (d0.getFullYear() === d1.getFullYear()
@@ -1122,17 +1244,22 @@ function renderScalars() {
   $("th_d1").textContent = d1 ? fmtMonY(d1) : "—";
   $("th_det").textContent = fmt(R.nonEmpty) + " animal and human detections";
   $("th_animal").textContent = nAnimalTypes;
+  const why = Object.entries(R.droppedBy).filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]).map(([k, v]) => k + " " + fmt(v)).join(" · ");
   const KPI = [
-    [fmt(R.images), "Images in kept events", false],
-    [fmt(R.events), "Photo sequences", true],
-    [fmt(R.nonEmpty), "Animal &amp; human detections", false],
-    [String(stn), "Camera stations", true],
-    [String(nAnimalTypes), "Animal types", false],
-    [fmt(R.dropped), "Events filtered out", true],
+    [fmt(R.images), "Images in kept events", false, ""],
+    [fmt(R.events), "Photo sequences", true, ""],
+    [fmt(R.nonEmpty), "Animal &amp; human detections", false, ""],
+    [String(stn), "Camera stations", true, ""],
+    [String(nAnimalTypes), "Animal types", false, ""],
+    [fmt(R.dropped), "Events filtered out", true, why],
   ];
   $("kpis").innerHTML = KPI.map((k) =>
     '<div class="kpi' + (k[2] ? " alt" : "") + '"><div class="v">' + k[0] +
-    '</div><div class="k">' + k[1] + "</div></div>").join("");
+    '</div><div class="k">' + k[1] + "</div>" +
+    (k[3] ? '<div class="s">' + k[3] + "</div>" : "") + "</div>").join("");
+  $("thesisWait").hidden = true;
+  $("thesisFull").hidden = false;
   $("clockerr").textContent = R.badDates
     ? fmt(R.badDates) + (R.badDates === 1 ? " record carries" : " records carry") +
       " an unset-clock (1970/epoch) or out-of-range timestamp; these are excluded from the " +
@@ -1297,10 +1424,38 @@ function seasonLegendClick(e) {
   if (g && SF[SEASON.mode].dr[g]) { SEASON.drill = g; renderSeason(); }
   return false;
 }
+/* Plotly is 4.5 MB from a CDN, the one heavyweight dependency, so a slow or
+   flaky connection can miss it while everything else loads. Retry it from two
+   CDNs on demand rather than giving up until the page is reloaded. */
+var PLOTLY_SRCS = [
+  "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js",
+  "https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js",
+];
+var _plotlyLoading = false;
+function ensurePlotly(next, srcs) {
+  if (typeof Plotly !== "undefined") { _plotlyLoading = false; next(true); return; }
+  if (_plotlyLoading) return;
+  const rest = srcs || PLOTLY_SRCS;
+  if (!rest.length) { _plotlyLoading = false; next(false); return; }
+  _plotlyLoading = true;
+  const el = document.createElement("script");
+  el.src = rest[0];
+  el.onload = () => { _plotlyLoading = false; next(typeof Plotly !== "undefined"); };
+  el.onerror = () => { _plotlyLoading = false; ensurePlotly(next, rest.slice(1)); };
+  document.head.appendChild(el);
+}
 function renderSeason() {
   const host = $("fig_D");
   if (typeof Plotly === "undefined") {
-    host.innerHTML = '<p class="hint">The seasonal chart needs the Plotly library, which loads from the internet. Reconnect and reload the page to see it.</p>';
+    host.innerHTML = '<p class="hint">Fetching the chart library&hellip;</p>';
+    ensurePlotly((ok) => {
+      if (ok) { renderSeason(); return; }
+      host.innerHTML = '<p class="hint">The seasonal chart needs the Plotly library, which failed to ' +
+        'load from the internet. Check the connection, then</p>' +
+        '<p style="margin-top:8px"><button class="mini" id="plotlyRetry">Try again</button></p>';
+      const b = $("plotlyRetry");
+      if (b) b.addEventListener("click", () => { host.innerHTML = '<p class="hint">Fetching the chart library&hellip;</p>'; ensurePlotly((ok2) => renderSeason()); });
+    });
     return;
   }
   if (!SF || !SF.T.ov.data.length) { Plotly.purge("fig_D"); host.innerHTML = '<p class="hint">No dated events to show.</p>'; return; }
@@ -1682,26 +1837,35 @@ function saveBlob(blob, name) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
+/* EXIF-style timestamp, matching the master's date column. */
+function fmtExif(t) {
+  if (!isFinite(t)) return "";
+  const d = new Date(t);
+  return d.getFullYear() + ":" + pad(d.getMonth() + 1) + ":" + pad(d.getDate()) + " " +
+    pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+}
 function downloadCsv() {
   const R = S.results;
   if (!R) return;
-  const head = ["sequence_id", "prediction", "score", "top1",
-    "top2", "top2_score", "top3", "top3_score",
+  /* Column names follow the master CSV wherever an event-level equivalent
+     exists; event-only extras keep descriptive names, sequence_id last. */
+  const head = ["filename", "date", "prediction_seq", "top1_seq", "score_seq", "above_threshold",
+    "top2_seq", "top2_score", "top3_seq", "top3_score",
     "sequence_seconds", "n_images", "n_animal_images", "n_human_images", "n_vehicle_images",
-    "station", "date_start", "date_end", "example_image"];
+    "station", "date_end", "sequence_id"];
   const parts = [head.join(",") + "\n"];
   let buf = "";
   for (let k = 0; k < R.events; k++) {
     const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
     buf += [
-      csvCell(S.id[i]), csvCell(r.label), r.score.toFixed(4), csvCell(r.top1 || r.label),
+      csvCell(S.firstFile[i]), fmtExif(S.tMin[i]),
+      csvCell(r.label), csvCell(r.top1 || r.label), r.score.toFixed(4),
+      r.kind === "undefined" ? "no" : "yes",
       csvCell(r.second || ""), r.second ? r.secondScore.toFixed(4) : "",
       csvCell(r.third || ""), r.third ? r.thirdScore.toFixed(4) : "",
       Math.round(seqSeconds(i)), S.nImg[i], S.nAnimal[i], S.nHuman[i], S.nVehicle[i],
-      csvCell(S.station[i]),
-      isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 19).replace("T", " ") : "",
-      isFinite(S.tMax[i]) ? new Date(S.tMax[i]).toISOString().slice(0, 19).replace("T", " ") : "",
-      csvCell(S.firstFile[i]),
+      csvCell(S.station[i]), fmtExif(S.tMax[i]),
+      csvCell(S.id[i]),
     ].join(",") + "\n";
     if (buf.length > 1 << 20) { parts.push(buf); buf = ""; }
   }
@@ -1988,6 +2152,11 @@ window.addEventListener("resize", () => {
   }, 220);
 });
 window.addEventListener("orientationchange", () => setTimeout(_rebuildAll, 300));
+
+$("helpbtn").addEventListener("click", () => { $("helpov").hidden = false; });
+$("helpclose").addEventListener("click", () => { $("helpov").hidden = true; });
+$("helpov").addEventListener("click", (e) => { if (e.target === $("helpov")) $("helpov").hidden = true; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("helpov").hidden = true; });
 
 tryAutoProtocol();
 tryAutoLoad();

@@ -174,8 +174,12 @@ tr.photorow td{background:var(--night2);white-space:normal}
   border:1px solid var(--line2);border-radius:6px;padding:4px 7px;
   font-family:'IBM Plex Mono',monospace;font-size:11px}
 .filterrow input::placeholder{color:var(--faint)}
-#helpov{position:fixed;inset:0;background:rgba(5,9,7,.74);z-index:80;display:flex;align-items:center;justify-content:center;padding:18px}
-#helpov[hidden]{display:none}
+#helpov,#protov{position:fixed;inset:0;background:rgba(5,9,7,.74);z-index:80;display:flex;align-items:center;justify-content:center;padding:18px}
+#helpov[hidden],#protov[hidden]{display:none}
+.protov-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+.protov-table th{position:sticky;top:0;background:var(--bark2);font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);padding:7px 10px;text-align:left}
+.protov-table td{padding:4px 10px;border-top:1px solid var(--line);white-space:nowrap}
+.protov-table td.num{text-align:right;font-family:'IBM Plex Mono',monospace}
 .helpbox{background:var(--bark);border:1px solid var(--line2);border-radius:var(--r);max-width:840px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.55)}
 .helphead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line)}
 .helphead h2{font-size:17px}
@@ -245,7 +249,7 @@ tr.photorow td{background:var(--night2);white-space:normal}
         </div>
         <div class="sub">Events scoring below this are labelled <i>undefined</i>.</div>
         <div class="checks" style="margin-top:8px">
-          <label><input type="checkbox" id="inc-undefined" checked> include events below the threshold (labelled &lsquo;undefined&rsquo;)</label>
+          <label><input type="checkbox" id="inc-undefined"> include events below the threshold (labelled &lsquo;undefined&rsquo;)</label>
         </div>
       </div>
       <div class="field">
@@ -340,7 +344,7 @@ tr.photorow td{background:var(--night2);white-space:normal}
   <div class="controls">
     <span class="lbl">Show</span><select id="mapSel"></select>
     <span class="cap" id="protStatus"></span>
-    <span class="savebtns"><button class="mini" id="protPick" hidden>Use a different protocol (.xlsx)</button></span>
+    <span class="savebtns"><button class="mini" id="protView">View protocol</button><button class="mini" id="protPick" hidden>Use a different protocol (.xlsx)</button></span>
     <input type="file" id="protFile" accept=".xlsx" hidden>
   </div>
   <div class="card" id="fig_M"></div>
@@ -479,6 +483,18 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
 
 </div><!-- /wrap -->
 
+<!-- ================= PROTOCOL OVERLAY ================= -->
+<div id="protov" hidden>
+  <div class="helpbox" role="dialog" aria-label="Field protocol">
+    <div class="helphead"><h2 id="protovtitle">Field protocol</h2>
+      <span style="display:inline-flex;gap:8px">
+        <button class="mini" id="protovcsv">Save as CSV</button>
+        <button class="mini" id="protovclose">Close</button>
+      </span></div>
+    <div class="helpbody" id="protovbody"></div>
+  </div>
+</div>
+
 <!-- ================= HELP OVERLAY ================= -->
 <div id="helpov" hidden>
   <div class="helpbox" role="dialog" aria-label="Help">
@@ -495,7 +511,8 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
         <li><b>Confidence threshold</b> - an event whose best species score is below this is
           labelled &lsquo;undefined&rsquo; instead of a species name. The companion tick box decides
           whether those undefined events stay in the results (shown in red in the table, and in
-          the grey &lsquo;unidentified&rsquo; group in the charts) or are dropped entirely.</li>
+          the grey &lsquo;unidentified&rsquo; group in the charts) or are dropped entirely; they
+          are dropped by default.</li>
         <li><b>Sequence gap</b> - the rule that chains photographs into events: each photo
           within this many seconds of the previous one (in the same folder) joins the same
           event, so an event can last far longer than the gap when an animal lingers. Blank
@@ -2345,7 +2362,49 @@ window.addEventListener("orientationchange", () => setTimeout(_rebuildAll, 300))
 $("helpbtn").addEventListener("click", () => { $("helpov").hidden = false; });
 $("helpclose").addEventListener("click", () => { $("helpov").hidden = true; });
 $("helpov").addEventListener("click", (e) => { if (e.target === $("helpov")) $("helpov").hidden = true; });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("helpov").hidden = true; });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { $("helpov").hidden = true; $("protov").hidden = true; }
+});
+
+/* ----- field protocol viewer ----- */
+function protSetupStr(v) { return v.setup instanceof Date ? fmtDay(v.setup) : String(v.setup || ""); }
+function protTimeStr(v) {
+  if (v.time instanceof Date) return pad(v.time.getHours()) + ":" + pad(v.time.getMinutes());
+  return String(v.time || "");
+}
+function showProtocol() {
+  const entries = PROT ? Object.entries(PROT).sort((a, b) => a[0].localeCompare(b[0])) : [];
+  $("protovtitle").textContent = "Field protocol · " + PROT_SRC;
+  if (!entries.length) {
+    $("protovbody").innerHTML = '<p class="hint" style="margin-top:12px">No field protocol is loaded.</p>';
+  } else {
+    $("protovbody").innerHTML =
+      '<p style="margin-top:10px">' + entries.length + " camera stations with coordinates and setup details. " +
+      "These place the circles on the camera-grid map.</p>" +
+      '<table class="protov-table"><thead><tr><th>Station</th><th class="num">Latitude</th>' +
+      '<th class="num">Longitude</th><th>Set up</th><th>Time</th><th>By</th></tr></thead><tbody>' +
+      entries.map(([id, v]) =>
+        "<tr><td>" + esc(id) + '</td><td class="num">' + (+v.lat).toFixed(5) + "</td>" +
+        '<td class="num">' + (+v.lon).toFixed(5) + "</td>" +
+        "<td>" + esc(protSetupStr(v)) + "</td><td>" + esc(protTimeStr(v)) + "</td>" +
+        "<td>" + esc(String(v.by || "")) + "</td></tr>").join("") +
+      "</tbody></table>";
+  }
+  $("protov").hidden = false;
+}
+$("protView").addEventListener("click", showProtocol);
+$("protovclose").addEventListener("click", () => { $("protov").hidden = true; });
+$("protov").addEventListener("click", (e) => { if (e.target === $("protov")) $("protov").hidden = true; });
+$("protovcsv").addEventListener("click", () => {
+  const entries = PROT ? Object.entries(PROT).sort((a, b) => a[0].localeCompare(b[0])) : [];
+  if (!entries.length) return;
+  let csv = "station,latitude,longitude,setup,time,by\n";
+  entries.forEach(([id, v]) => {
+    csv += [csvCell(id), (+v.lat).toFixed(5), (+v.lon).toFixed(5),
+      csvCell(protSetupStr(v)), csvCell(protTimeStr(v)), csvCell(String(v.by || ""))].join(",") + "\n";
+  });
+  saveBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "field_protocol_stations.csv");
+});
 
 tryAutoProtocol();
 tryAutoLoad();

@@ -935,3 +935,57 @@ def test_merge_without_canonical_root_leaves_paths_alone(tmp_path):
         row = next(csv.DictReader(handle))
     assert row["filename"] == "/media/x/My Book9/CTM/1.jpg"   # untouched
     assert row[dfb.SEQUENCE_ID_COLUMN] == "0a1b2c3d-7"        # still derived
+
+
+# ---------------------------------------------------------------------------
+# detector benchmark (pure parts; the timing itself needs torch)
+# ---------------------------------------------------------------------------
+import benchmark_detectors as bench  # noqa: E402
+
+
+def test_human_duration():
+    assert bench.human_duration(45) == "45 sec"
+    assert bench.human_duration(600) == "10 min"
+    assert bench.human_duration(9 * 3600) == "9.0 hours"
+    assert bench.human_duration(4.2 * 86400) == "4.2 days"
+    assert bench.human_duration(None) == "unknown"
+    assert bench.human_duration(-1) == "unknown"
+
+
+def test_extrapolate():
+    assert bench.extrapolate(5.0, 1_845_397) == pytest.approx(369079.4, rel=1e-4)
+    assert bench.extrapolate(0, 100) is None
+    assert bench.extrapolate(5.0, 0) is None
+
+
+def test_sample_from_master_is_representative(tmp_path):
+    master = tmp_path / "master.csv"
+    with open(master, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(dfb.CSV_HEADER)
+        for i in range(1000):
+            row = ["x"] * len(dfb.CSV_HEADER)
+            row[0] = f"/archive/cam{i % 7}/IMG_{i:04d}.JPG"
+            w.writerow(row)
+    picked, seen = bench.sample_from_master(str(master), 50, seed=3)
+    assert seen == 1000
+    assert len(picked) == 50
+    assert len(set(picked)) == 50                      # no duplicates
+    assert all(p.startswith("/archive/") for p in picked)
+    # Deterministic for a given seed, so a benchmark can be repeated exactly.
+    assert bench.sample_from_master(str(master), 50, seed=3)[0] == picked
+    assert bench.sample_from_master(str(master), 50, seed=4)[0] != picked
+
+
+def test_format_table_reports_relative_cost():
+    rows = [
+        {"detector": "DFbsMDS", "rate": 5.0, "load_s": 12.0, "animal_frac": 0.20},
+        {"detector": "DFMDS", "rate": 2.5, "load_s": 13.0, "animal_frac": 0.24},
+        {"detector": "MDR", "error": "out of memory"},
+    ]
+    out = bench.format_table(rows, 1_845_397, baseline="DFbsMDS")
+    assert "DFbsMDS" in out and "DFMDS" in out
+    assert "2.00x" in out          # DFMDS is twice the cost of the baseline
+    assert "4.3 days" in out       # 1,845,397 / 5 img/s
+    assert "8.5 days" in out       # 1,845,397 / 2.5 img/s
+    assert "failed" in out and "out of memory" in out

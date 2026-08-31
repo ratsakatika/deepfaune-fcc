@@ -171,6 +171,18 @@ changed retrospectively without re-running anything:
   sub-classifier's softmax; a conditional "which bird" distribution, only
   meaningful when the animal is a bird.
 
+- `sequence_id` - a globally unique key for the detection event. **`seqnum`
+  alone is not unique**: the engine numbers sequences per folder, restarting
+  at 1 in every one, so seqnum 1 recurs about once per folder across the
+  archive. Group by `sequence_id` (or by folder plus `seqnum`) when counting
+  events, never by `seqnum` on its own. The dashboard already does this.
+
+`sequence_id` and the image paths are derived when the master and Desktop
+CSVs are built rather than in the shards, so they apply uniformly to every
+row, including shards written by older versions. Paths are re-rooted onto the
+run's own archive root, so a drive that remounts under a different name (My
+Book1 vs My Book2) still yields one consistent set of paths.
+
 To re-threshold after the fact: take rows where the max of the `score_*`
 columns (or `score_seq`) clears your new cut-off, using `top1_seq` as the
 label. Shards written by older versions of the tool lack the raw-score
@@ -232,6 +244,11 @@ the shared pidfile means the service and manual runs never double-classify.
 
 ## Resume and safety
 
+- Settings follow the run: when the out-dir already holds a run, that run's
+  own settings (detector, threshold, maxlag, birds, exclusions, threads)
+  become the suggested values, so continuing it cannot silently reclassify
+  the remainder differently. Anything given explicitly on the command line
+  still wins, and the prompts can still change anything.
 - Resumable: each shard's CSV is written atomically, and a shard that already
   has a CSV is skipped, so stopping and restarting is safe.
 - Incremental: because finished folders are skipped, adding new photographs to

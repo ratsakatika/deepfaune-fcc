@@ -438,7 +438,8 @@ def test_merge_csvs_header_once_quoting_and_ignores_decoys(tmp_path):
 
     with open(merge_out, newline="", encoding="utf-8") as handle:
         rows = list(csv.reader(handle))
-    assert rows[0] == dfb.CSV_HEADER  # header written exactly once
+    # Header written exactly once, with the derived sequence_id appended.
+    assert rows[0] == dfb.CSV_HEADER + [dfb.SEQUENCE_ID_COLUMN]
     assert len(rows) == 3  # header + two data rows
     species = {r[3] for r in rows[1:]}
     assert "wolf, grey" in species  # comma survived quoting as one field
@@ -493,8 +494,9 @@ def test_merge_csvs_maps_mixed_schemas_by_column_name(tmp_path):
     assert (n_files, n_rows) == (2, 2)
     with open(merge_out, newline="", encoding="utf-8") as handle:
         rows = list(csv.reader(handle))
-    # The widest header supplies the column order (old is a subset of new).
-    assert rows[0] == new_header
+    # The widest header supplies the column order (old is a subset of new),
+    # with the derived sequence_id appended.
+    assert rows[0] == new_header + [dfb.SEQUENCE_ID_COLUMN]
     by_file = {r[0]: dict(zip(rows[0], r)) for r in rows[1:]}
     old = by_file["/a/1.jpg"]
     assert old["prediction_seq"] == "wolf"  # re-mapped by name, not position
@@ -846,3 +848,90 @@ def test_run_metadata_records_resume_fields(tmp_path):
         assert field in meta, field
     assert meta["threads"] == 3
     assert meta["heartbeat_secs"] == 30
+
+
+# ---------------------------------------------------------------------------
+# derived columns: globally unique sequence_id and re-rooted paths
+# ---------------------------------------------------------------------------
+def test_shard_relpath_from_row_recovers_the_prefix(tmp_path):
+    # A shard CSV name embeds sha1(relpath)[:8], so the archive-relative path
+    # can be recovered from an absolute path under ANY mount name.
+    root = "/media/rim/My Book1"
+    leaf = root + "/Camera Trap Monitoring/SiteA/101_BTCF"
+    name = dfb.shard_csv_name(root, leaf)
+    rel = "Camera Trap Monitoring/SiteA/101_BTCF"
+    assert dfb.shard_relpath_from_row(name, leaf) == rel
+    # The same shard recorded under a different mount name resolves identically.
+    assert dfb.shard_relpath_from_row(
+        name, "/media/rim/My Book2/Camera Trap Monitoring/SiteA/101_BTCF"
+    ) == rel
+    # An unrelated directory has no matching split: leave the path alone.
+    assert dfb.shard_relpath_from_row(name, "/somewhere/else") is None
+    assert dfb.shard_relpath_from_row("nothash.csv", leaf) is None
+
+
+def test_sequence_id_and_rerooted_path():
+    assert dfb.sequence_id("0a1b2c3d", "471") == "0a1b2c3d-471"
+    assert dfb.sequence_id("0a1b2c3d", "") == ""      # no seqnum recorded
+    assert dfb.sequence_id(None, "471") == ""         # not a shard CSV
+    assert dfb.rerooted_path(
+        "/media/rim/My Book2/CTM/SiteA/IMG_1.JPG", "/media/rim/My Book1", "CTM/SiteA"
+    ) == "/media/rim/My Book1/CTM/SiteA/IMG_1.JPG"
+    # Missing pieces leave the path untouched.
+    assert dfb.rerooted_path("/x/1.jpg", None, "rel") == "/x/1.jpg"
+    assert dfb.rerooted_path("/x/1.jpg", "/root", None) == "/x/1.jpg"
+
+
+def test_merge_adds_unique_sequence_ids_and_normalises_paths(tmp_path):
+    """The real defect: two folders each numbering their sequences from 1, and
+    the same archive recorded under two mount names after a remount."""
+    out = tmp_path / "out"
+    out.mkdir()
+    root1 = "/media/rim/My Book1"
+    root2 = "/media/rim/My Book2"
+    leaf_a = "CTM/SiteA/100_BTCF"
+    leaf_b = "CTM/SiteB/101_BTCF"
+    name_a = dfb.shard_csv_name(root1, f"{root1}/{leaf_a}")
+    name_b = dfb.shard_csv_name(root1, f"{root1}/{leaf_b}")
+    # Shard A was classified before the remount, shard B after it.
+    _write_shard_csv(out / name_a, [
+        [f"{root1}/{leaf_a}/1.jpg", "d", 1, "wolf", "wolf", 0.9, "yes",
+         "wolf", "wolf", 0.9, 1, 0, "0.9", "0", "0"],
+        [f"{root1}/{leaf_a}/2.jpg", "d", 2, "lynx", "lynx", 0.8, "yes",
+         "lynx", "lynx", 0.8, 1, 0, "0.8", "0", "0"],
+    ])
+    _write_shard_csv(out / name_b, [
+        [f"{root2}/{leaf_b}/9.jpg", "d", 1, "bear", "bear", 0.95, "yes",
+         "bear", "bear", 0.95, 1, 0, "0.9", "0", "0"],
+    ])
+
+    merge_out = out / "master.csv"
+    dfb.merge_csvs(str(out), str(merge_out), canonical_root=root1)
+    with open(merge_out, newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    # Every path now sits under one root, despite the mixed mount names.
+    assert all(r["filename"].startswith(root1 + "/") for r in rows)
+    assert f"{root1}/{leaf_b}/9.jpg" in [r["filename"] for r in rows]
+    # seqnum collides across shards; sequence_id does not.
+    assert [r["seqnum"] for r in rows].count("1") == 2
+    ids = [r[dfb.SEQUENCE_ID_COLUMN] for r in rows]
+    assert len(set(ids)) == 3
+    # The id ties a row to its shard, and to its sequence within that shard.
+    assert ids[0].endswith("-1") and ids[1].endswith("-2")
+    assert ids[0].split("-")[0] == ids[1].split("-")[0]      # same shard
+    assert ids[2].split("-")[0] != ids[0].split("-")[0]      # different shard
+
+
+def test_merge_without_canonical_root_leaves_paths_alone(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    _write_shard_csv(out / "a__0a1b2c3d.csv",
+                     [["/media/x/My Book9/CTM/1.jpg", "d", 7, "wolf", "wolf",
+                       0.9, "yes", "wolf", "wolf", 0.9, 1, 0, "0.9", "0", "0"]])
+    merge_out = out / "master.csv"
+    dfb.merge_csvs(str(out), str(merge_out))
+    with open(merge_out, newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["filename"] == "/media/x/My Book9/CTM/1.jpg"   # untouched
+    assert row[dfb.SEQUENCE_ID_COLUMN] == "0a1b2c3d-7"        # still derived

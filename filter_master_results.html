@@ -155,10 +155,7 @@ label { font-size: 14px; }
 .checks label { display: inline-flex; align-items: center; gap: 7px; }
 .rangerow { display: flex; align-items: center; gap: 12px; }
 .rangerow input[type="range"] { flex: 1 1 auto; accent-color: var(--data); }
-.rangerow output {
-  font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums;
-  font-size: 14px; min-width: 4ch; text-align: right;
-}
+.rangerow input[type="number"] { width: 6.5em; flex: none; text-align: right; }
 
 /* ---------- file drop ---------- */
 .drop {
@@ -236,8 +233,13 @@ td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; fon
   display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px;
   font-weight: 500; background: var(--surface-2); border: 1px solid var(--line);
 }
-.pill.undef { color: var(--ink-3); }
 .pill.animal { background: var(--data-soft); border-color: transparent; color: var(--ink); }
+.pill.below { color: var(--crit); border-color: var(--crit); background: transparent; }
+.pill.other { color: var(--ink-3); }
+.legend {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--ink-3); margin: 0 0 10px;
+}
 
 /* ---------- charts ---------- */
 .charts { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
@@ -325,8 +327,10 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
         <div class="field">
           <span class="lbl">Confidence threshold</span>
           <div class="rangerow">
-            <input type="range" id="thr" min="0" max="1" step="0.01" value="0.8">
-            <output id="thrOut">0.80</output>
+            <input type="range" id="thr" min="0" max="1" step="0.01" value="0.8"
+                   aria-label="Confidence threshold slider">
+            <input type="number" id="thrNum" min="0" max="1" step="0.01" value="0.80"
+                   aria-label="Confidence threshold">
           </div>
           <p class="hint">Events scoring below this are labelled <em>undefined</em>.</p>
         </div>
@@ -352,9 +356,10 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
         <summary>Species: candidates and per-species overrides</summary>
         <p class="hint" style="margin:0 0 10px">
           Unticking a species removes it from the candidate set: those detections are
-          re-scored and fall to their next-best species, exactly as if it had been
-          excluded when the archive was classified. Blank override cells use the
-          global values above.
+          re-scored and fall to their next-best species. This is the only place
+          species exclusion belongs - the raw scores are recorded for every class,
+          so the decision is reversible here and permanent if made during
+          classification. Blank override cells use the global values above.
         </p>
         <div class="checks" style="margin-bottom:10px">
           <button type="button" id="sp-all">All species</button>
@@ -378,7 +383,7 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
   <!-- 3. ACTIONS ---------------------------------------------------------- -->
   <div class="actionbar" id="actions" style="opacity:.5;pointer-events:none">
     <button id="generate" class="primary">Generate</button>
-    <button id="download" disabled>Download CSV</button>
+    <button id="download" disabled>Download filtered results as CSV</button>
     <span class="status" id="actionstatus">Load a file to begin.</span>
     <div class="spacer"></div>
     <div class="progress" id="genprog" hidden style="min-width:230px;margin:0">
@@ -410,7 +415,8 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
       </div>
 
       <h3 style="font-size:14px;margin:26px 0 8px">Events</h3>
-      <p class="hint" id="tablenote" style="margin:0 0 10px"></p>
+      <p class="hint" id="tablenote" style="margin:0 0 6px"></p>
+      <p class="legend" id="legend"></p>
       <div class="tablewrap">
         <table><thead><tr>
           <th>Species</th><th class="num">Score</th><th class="num">Images</th>
@@ -683,7 +689,8 @@ function updateCandCount() {
 }
 
 function readFilters() {
-  const gThr = +$("thr").value, gLen = Math.max(0, +$("minlen").value || 0);
+  const gThr = Math.min(1, Math.max(0, +$("thrNum").value || 0));
+  const gLen = Math.max(0, +$("minlen").value || 0);
   const on = new Uint8Array(S.K).fill(0);
   const thr = new Float64Array(S.K).fill(gThr);
   const len = new Float64Array(S.K).fill(gLen);   // seconds, not image count
@@ -785,7 +792,7 @@ async function generate() {
   $("actionstatus").textContent = events
     ? "Generated. Download is ready."
     : "No events matched these filters — try relaxing the threshold.";
-  $("resstamp").textContent = "threshold " + (+$("thr").value).toFixed(2) +
+  $("resstamp").textContent = "threshold " + (+$("thrNum").value).toFixed(2) +
     " · " + document.querySelectorAll(".sp-on:checked").length + " species";
 }
 
@@ -833,8 +840,13 @@ function renderResults() {
     const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
     const tr = document.createElement("tr");
     const when = isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 16).replace("T", " ") : "—";
+    /* Show the species the model actually chose. Below the threshold it is
+       shown in red rather than replaced by "undefined", which told the reader
+       nothing while the runner-up column named a species anyway. */
+    const shown = r.top1 || r.label;
+    const cls = r.kind === "animal" ? "animal" : (r.kind === "undefined" ? "below" : "other");
     tr.innerHTML =
-      '<td><span class="pill ' + (r.kind === "animal" ? "animal" : "undef") + '">' + esc(r.label) + "</span></td>" +
+      '<td><span class="pill ' + cls + '">' + esc(shown) + "</span></td>" +
       '<td class="num">' + r.score.toFixed(3) + "</td>" +
       '<td class="num">' + S.nImg[i] + "</td>" +
       '<td class="num">' + fmtSecs(seqSeconds(i)) + "</td>" +
@@ -847,6 +859,12 @@ function renderResults() {
   $("tablenote").textContent = R.events > LIMIT
     ? "Showing the first " + LIMIT + " of " + fmt(R.events) + " events. The CSV holds them all."
     : fmt(R.events) + " events.";
+  const thr = (+$("thrNum").value).toFixed(2);
+  $("legend").innerHTML =
+    '<span class="pill animal">species</span> scored at or above ' + thr + " · " +
+    '<span class="pill below">species</span> scored below ' + thr +
+    ' (exported with prediction "undefined", the species kept in top1) · ' +
+    '<span class="pill other">empty / human / vehicle</span>';
 }
 function fmtSecs(s) {
   if (s < 60) return Math.round(s) + "s";
@@ -985,7 +1003,18 @@ drop.addEventListener("drop", (e) => {
 });
 
 $("thr").addEventListener("input", () => {
-  $("thrOut").textContent = (+$("thr").value).toFixed(2);
+  $("thrNum").value = (+$("thr").value).toFixed(2);
+  invalidate();
+});
+$("thrNum").addEventListener("input", () => {
+  const v = +$("thrNum").value;
+  if (isFinite(v) && v >= 0 && v <= 1) $("thr").value = v;   /* mirror, do not fight typing */
+  invalidate();
+});
+$("thrNum").addEventListener("change", () => {
+  const v = Math.min(1, Math.max(0, +$("thrNum").value || 0));
+  $("thrNum").value = v.toFixed(2);
+  $("thr").value = v;
   invalidate();
 });
 $("minlen").addEventListener("input", invalidate);

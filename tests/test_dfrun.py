@@ -276,50 +276,6 @@ def test_build_worker_command_includes_flags():
 
 
 # ---------------------------------------------------------------------------
-# impossible-species exclusion picker
-# ---------------------------------------------------------------------------
-def test_parse_exclusion_numbers():
-    assert dfrun.parse_exclusion_numbers("3, 7,12", 38) == ([3, 7, 12], None)
-    assert dfrun.parse_exclusion_numbers("5,5,5", 38) == ([5], None)  # dupes
-    assert dfrun.parse_exclusion_numbers("1,,2,", 38) == ([1, 2], None)  # stray commas
-    assert dfrun.parse_exclusion_numbers("", 38) == ([], None)  # blank = none
-    numbers, err = dfrun.parse_exclusion_numbers("2,zebra", 38)
-    assert numbers is None and "'zebra' is not a number" in err
-    numbers, err = dfrun.parse_exclusion_numbers("0", 38)
-    assert numbers is None and "out of range" in err
-    numbers, err = dfrun.parse_exclusion_numbers("39", 38)
-    assert numbers is None and "out of range" in err
-
-
-def _scripted_prompt(replies):
-    """A prompt function that replays canned replies in order."""
-    replies = list(replies)
-    return lambda _msg: replies.pop(0)
-
-
-def test_prompt_excluded_classes_keep_and_clear():
-    # Enter keeps the current selection.
-    kept = dfrun.prompt_excluded_classes(["ibex"], _scripted_prompt([""]))
-    assert kept == ["ibex"]
-    # "yes" means include everything: the exclusion list is cleared.
-    assert dfrun.prompt_excluded_classes(["ibex"], _scripted_prompt(["y"])) == []
-    # An unparseable answer keeps the current selection.
-    assert dfrun.prompt_excluded_classes(["ibex"], _scripted_prompt(["maybe"])) == ["ibex"]
-
-
-def test_prompt_excluded_classes_picker_reasks_until_valid():
-    menu = sorted(dfrun.dfb.ANIMAL_CLASSES_EN)
-    # "no" -> menu; two bad entries are re-asked; then two valid numbers.
-    picks = f"{menu.index('ibex') + 1}, {menu.index('marmot') + 1}"
-    chosen = dfrun.prompt_excluded_classes(
-        [], _scripted_prompt(["n", "1,zebra", "0,2", picks])
-    )
-    assert chosen == ["ibex", "marmot"]  # engine order
-    # "no" then Enter at the menu means no exclusions after all.
-    assert dfrun.prompt_excluded_classes([], _scripted_prompt(["n", ""])) == []
-
-
-# ---------------------------------------------------------------------------
 # statistics and completion outputs (Stage 6, Stage 7, A11)
 # ---------------------------------------------------------------------------
 def test_station_from_path():
@@ -594,9 +550,11 @@ def test_render_service_unit():
 # ---------------------------------------------------------------------------
 def test_explicit_cli_settings():
     given = dfrun.explicit_cli_settings(
-        ["--threads", "3", "--no-birds", "--exclude-classes=wolf,lynx", "--yes"]
+        ["--threads", "3", "--no-birds", "--yes"]
     )
-    assert given == {"threads", "birds", "exclude_classes"}
+    assert given == {"threads", "birds"}
+    # Species exclusion is no longer a classification setting, so no flag for it.
+    assert dfrun.explicit_cli_settings(["--exclude-classes=wolf"]) == set()
     assert dfrun.explicit_cli_settings([]) == set()
     assert dfrun.explicit_cli_settings(None) == set()
     assert "detector" in dfrun.explicit_cli_settings(["--detector", "MDS"])
@@ -634,7 +592,7 @@ def test_apply_previous_settings_respects_explicit_flags():
                 "excluded_classes": ["ibex"]}
     taken = dfrun.apply_previous_settings(
         params, previous, explicit={"threads", "exclude_classes"}
-    )
+    )   # exclude_classes stays honoured as an "explicit" key for old callers
     assert params["detector"] == "DFbsMDS"   # not given: resumed
     assert params["threads"] == 2            # given on the command line: kept
     assert params["exclude_classes"] == ["wolf"]

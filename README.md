@@ -63,7 +63,6 @@ To resume after any stop, just run `dfrun` again; finished shards are skipped.
 | --- | --- | --- |
 | detector | DF | DF, MDS, DFbsMDS, DFMDS or MDR. DF is the lightest; avoid MDR on CPU. |
 | birds | on | The 8-way bird sub-classifier head. |
-| exclude | none | Impossible species the classifier must never predict. |
 | threshold | 0.5 | Matches the demo script and the first long run (the GUI uses 0.8). |
 | maxlag | 20 s | Matches the demo script and the first long run (the GUI uses 10). |
 | batch-size | 8 | Must be at least 1. |
@@ -95,15 +94,15 @@ What each setting does:
   not on CPU.
 - **birds** - when on, crops classed as "bird" are split into eight groups
   (corvid, raptor, passerine and so on); when off they stay as "bird".
-- **exclude** - impossible species: animal classes that cannot occur in the
-  survey area (say, ibex or marmot in lowland forest) can be excluded so the
-  classifier never names them, which stops their lookalikes being mislabelled.
-  In the interactive run, answer "no" to "Include all animal classes?" and
-  pick numbers from the menu shown; on the command line, pass
-  `--exclude-classes "ibex,marmot,genet"` (English names, comma-separated) to
-  `dfrun` or `deepfaune_batch.py`. Exclusion only constrains the prediction
-  columns; the raw `score_*` columns are still recorded for every class, so
-  an exclusion can be reconsidered later from the same results.
+
+Note there is no species-exclusion setting here. Excluding species that cannot
+occur in the survey area is a filtering decision, not a classification one: the
+raw `score_*` columns are recorded for every class regardless, so the same
+exclusion applied in `filter_master_results.html` gives an identical result and
+can be undone, while excluding during classification is permanent and splits
+the archive if it is ever changed mid-run. `deepfaune_batch.py` keeps an
+`--exclude-classes` flag only so a run started before this changed can be
+resumed consistently.
 - **threshold** - the classification confidence cut-off. A prediction scoring
   below it is recorded as "undefined". Higher (for example 0.8) means fewer false
   positives (fewer wrong species labels) but more false negatives (more real
@@ -236,9 +235,11 @@ onto, when the drive has since been remounted elsewhere.
 a browser and reads the master CSV locally - nothing is uploaded. Because the
 `score_*` columns hold the complete distribution over every animal class, it
 re-derives predictions rather than just filtering the ones already written: set a
-global or per-species confidence threshold, require a minimum sequence length
-in seconds, and untick species that cannot occur so their detections fall to the
-next-best species, exactly as if they had been excluded at classification time.
+global or per-species confidence threshold (typed or by slider), require a
+minimum sequence length in seconds, and untick species that cannot occur so
+their detections fall to the next-best species. The events table names the
+species the model chose even when it scored below the threshold, shown in red,
+rather than hiding it behind "undefined".
 It shows the surviving events as summary tiles, charts and a table, then exports
 them as a CSV. Events are grouped by `sequence_id`.
 

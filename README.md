@@ -254,16 +254,29 @@ scores to three decimal places (naming the top choice even when it scored
 below the threshold, shown in red rather than hidden behind "undefined"),
 and, when the image files are reachable from where the page is opened,
 clicking a row previews its photographs (a silent probe decides this, so
-nothing ever renders broken). "Keep below-threshold events" sits with the
-threshold control, since those are animal detections rather than non-animal
-categories. Events whose camera clock was wrong
+nothing ever renders broken). "Include events below the threshold" sits with the
+threshold control, since those are animal detections (labelled "undefined")
+rather than a non-animal category. Events whose camera clock was wrong
 (1970 dates) are counted in station and map totals but left off the time
 panels, exactly as in the original dashboard. The ring saves as PNG or SVG,
 the seasonal chart and both bar panels save as PNG, and the species summary
-saves as a CSV. Two filtered exports are offered: an events CSV (one row per
-event, with `top2`/`top3` columns) and an images CSV that re-reads the master
-and keeps exactly its columns, writing only the rows of surviving events with
-the sequence-level verdict columns refreshed to the re-derived result.
+saves as a CSV. Two filtered exports are offered: an events CSV (one row per event, using
+the master's column names wherever an event-level equivalent exists -
+`prediction_seq`, `top1_seq`, `score_seq`, `above_threshold`, EXIF-style
+dates - plus second/third choices and event extras) and an images CSV that
+re-reads the master and keeps exactly its columns, writing only the rows of
+surviving events with the sequence-level verdict columns refreshed to the
+re-derived result. A Help button at the top opens a built-in guide to the
+filters, panels and numbers.
+
+Species scores are always the softmax over ALL classes: an unticked species
+can never be named, but its probability mass is not redistributed to the
+survivors. (The engine's own exclusion renormalises over the remaining
+classes, which inflates scores - to exactly 1.0 with a single candidate - so
+the page deliberately keeps the honest confidence instead; with nothing
+unticked the two are identical.) The "Events filtered out" figure lists its
+reasons - outside scope, recycle bin, excluded categories, below threshold,
+too short - under the tile.
 The seasonal chart and the map load their libraries (Plotly, Leaflet) from
 public CDNs, so those two panels need an internet connection the first time;
 everything else works offline. Events are grouped by `sequence_id`.

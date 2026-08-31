@@ -8,7 +8,7 @@
 # lightweight PredictorImage, and writes one CSV per shard atomically so that an
 # interrupted run can be restarted and will skip the shards already finished.
 #
-# Design notes (see HANDOVER.md section 6 for the full specification):
+# Design notes:
 #   - Sharding by leaf directory bounds memory (one folder of images in flight at
 #     a time) and preserves EXIF burst sequences (a deployment's burst lives in
 #     one folder; grouping across folders would corrupt sequence aggregation).

@@ -150,6 +150,7 @@ tr.sp-off td{opacity:.42}
 .tablewrap{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:8px}
 .tablewrap table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:780px}
 .tablewrap th{position:sticky;top:0;background:var(--bark2);font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);padding:8px 10px;text-align:left;z-index:1}
+.tablewrap .filterrow th{top:30px;text-transform:none;letter-spacing:0}
 .tablewrap td{padding:5px 10px;border-top:1px solid var(--line);white-space:nowrap}
 .tablewrap th.num,.tablewrap td.num{text-align:right;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
 .pill{padding:1px 8px;border-radius:6px;font-size:11.5px;font-family:'IBM Plex Mono',monospace;white-space:nowrap}
@@ -164,6 +165,14 @@ tr.ev.click:hover td{background:#18241e}
 tr.photorow td{background:var(--night2);white-space:normal}
 .pstrip{display:flex;gap:8px;overflow-x:auto;padding:4px 0}
 .pstrip img{height:120px;border-radius:6px;border:1px solid var(--line2);display:block}
+.tblbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+.tblbar .spacer{flex:1}
+.tblbar select{padding:4px 24px 4px 8px;font-size:11px}
+.filterrow th{padding:4px 6px 8px;background:var(--bark2)}
+.filterrow input{width:100%;min-width:52px;background:var(--night2);color:var(--mist);
+  border:1px solid var(--line2);border-radius:6px;padding:4px 7px;
+  font-family:'IBM Plex Mono',monospace;font-size:11px}
+.filterrow input::placeholder{color:var(--faint)}
 @media (min-width:1080px){
  .duo{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start}
  .duo .section{margin-top:42px}
@@ -388,11 +397,30 @@ under the scope, thresholds and species filters set above.</p>
   <p class="lead" id="tablenote"></p>
   <p class="tlegend" id="legend"></p>
   <p class="hint" id="photonote" style="margin:0 0 8px"></p>
+  <div class="tblbar">
+    <span class="hint">Rows per page</span>
+    <select id="pgsize" aria-label="Rows per page">
+      <option value="50" selected>50</option><option value="100">100</option><option value="200">200</option>
+    </select>
+    <div class="spacer"></div>
+    <button class="mini" id="pgprev" aria-label="Previous page">&larr;</button>
+    <span class="hint" id="pginfo"></span>
+    <button class="mini" id="pgnext" aria-label="Next page">&rarr;</button>
+  </div>
   <div class="tablewrap">
     <table><thead><tr>
       <th>Top 1</th><th class="num">Score</th><th class="num">Top 2</th>
       <th class="num">Top 3</th><th class="num">Images</th>
       <th class="num">Length</th><th>Station</th><th>Date</th>
+    </tr><tr class="filterrow">
+      <th><input data-f="sp" placeholder="filter" aria-label="Filter top 1"></th>
+      <th><input data-f="score" placeholder="min" inputmode="decimal" aria-label="Minimum score"></th>
+      <th><input data-f="t2" placeholder="filter" aria-label="Filter top 2"></th>
+      <th><input data-f="t3" placeholder="filter" aria-label="Filter top 3"></th>
+      <th><input data-f="img" placeholder="min" inputmode="numeric" aria-label="Minimum images"></th>
+      <th><input data-f="len" placeholder="min s" inputmode="numeric" aria-label="Minimum seconds"></th>
+      <th><input data-f="st" placeholder="filter" aria-label="Filter station"></th>
+      <th><input data-f="date" placeholder="2023-06" aria-label="Filter date"></th>
     </tr></thead><tbody id="resbody"></tbody></table>
   </div>
 </section>
@@ -950,6 +978,7 @@ async function generate() {
   setBar("genbar", 100);
   $("genmsg").textContent = fmt(events) + " events kept";
   $("geneta").textContent = "in " + humanTime((performance.now() - t0) / 1000);
+  TBL.page = 0; TBL.idx = null;
   buildDerived();
   renderAll();
   $("download").disabled = events === 0;
@@ -1494,17 +1523,53 @@ function renderAll() {
   renderTable();
 }
 
+/* Table view state: page, rows per page, and per-column filters. Filters
+   apply to the table view only; the CSV downloads always carry the full
+   generated results. */
+var TBL = { size: 50, page: 0, filters: { sp: "", score: "", t2: "", t3: "", img: "", len: "", st: "", date: "" }, idx: null };
+function eventWhen(i) {
+  return isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 16).replace("T", " ") : "—";
+}
+function tableIndex() {
+  if (TBL.idx) return TBL.idx;
+  const R = S.results, F = TBL.filters, out = [];
+  const sp = F.sp.trim().toLowerCase(), t2 = F.t2.trim().toLowerCase(), t3 = F.t3.trim().toLowerCase();
+  const st = F.st.trim().toLowerCase(), dt = F.date.trim().toLowerCase();
+  const minScore = F.score.trim() === "" ? -1 : +F.score;
+  const minImg = F.img.trim() === "" ? -1 : +F.img;
+  const minLen = F.len.trim() === "" ? -1 : +F.len;
+  for (let k = 0; k < R.events; k++) {
+    const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
+    if (sp && ((r.top1 || r.label) || "").toLowerCase().indexOf(sp) === -1) continue;
+    if (minScore >= 0 && !(r.score >= minScore)) continue;
+    if (t2 && (r.second || "").toLowerCase().indexOf(t2) === -1) continue;
+    if (t3 && (r.third || "").toLowerCase().indexOf(t3) === -1) continue;
+    if (minImg >= 0 && !(S.nImg[i] >= minImg)) continue;
+    if (minLen >= 0 && !(seqSeconds(i) >= minLen)) continue;
+    if (st && S.station[i].toLowerCase().indexOf(st) === -1) continue;
+    if (dt && eventWhen(i).toLowerCase().indexOf(dt) === -1) continue;
+    out.push(k);
+  }
+  TBL.idx = out;
+  return out;
+}
+function tableFiltersActive() {
+  return Object.values(TBL.filters).some((v) => v.trim() !== "");
+}
 function renderTable() {
   const R = S.results;
-  const LIMIT = 300;
+  const idx = tableIndex();
+  const pages = Math.max(1, Math.ceil(idx.length / TBL.size));
+  TBL.page = Math.min(Math.max(0, TBL.page), pages - 1);
+  const from = TBL.page * TBL.size, to = Math.min(idx.length, from + TBL.size);
   const tb = $("resbody");
   tb.innerHTML = "";
   const frag = document.createDocumentFragment();
-  for (let k = 0; k < Math.min(R.events, LIMIT); k++) {
+  for (let n = from; n < to; n++) {
+    const k = idx[n];
     const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
     const tr = document.createElement("tr");
     tr.className = "ev"; tr.dataset.i = i;
-    const when = isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 16).replace("T", " ") : "—";
     /* Show the species the model actually chose; below the threshold it is
        shown in red rather than replaced by "undefined". */
     const shown = r.top1 || r.label;
@@ -1517,13 +1582,19 @@ function renderTable() {
       '<td class="num">' + S.nImg[i] + "</td>" +
       '<td class="num">' + fmtSecs(seqSeconds(i)) + "</td>" +
       "<td>" + esc(S.station[i]) + "</td>" +
-      '<td class="num">' + when + "</td>";
+      '<td class="num">' + eventWhen(i) + "</td>";
     frag.appendChild(tr);
   }
   tb.appendChild(frag);
-  $("tablenote").textContent = (R.events > LIMIT
-    ? "Showing the first " + LIMIT + " of " + fmt(R.events) + " events, oldest first. The CSV holds them all."
-    : fmt(R.events) + " events, oldest first.");
+  $("pginfo").textContent = idx.length
+    ? fmt(from + 1) + "–" + fmt(to) + " of " + fmt(idx.length) + " · page " + (TBL.page + 1) + " of " + pages
+    : "no events match the column filters";
+  $("pgprev").disabled = TBL.page === 0;
+  $("pgnext").disabled = TBL.page >= pages - 1;
+  $("tablenote").textContent = fmt(R.events) + " events, oldest first." +
+    (tableFiltersActive()
+      ? " Column filters match " + fmt(idx.length) + " of them (table only; the CSV downloads keep the full results)."
+      : " Use the boxes under the headings to filter columns; text boxes match anywhere, number boxes are minimums.");
   probePhotos();
   photoHint();
   const thr = (+$("thrNum").value).toFixed(2);
@@ -1580,6 +1651,20 @@ function photoRow(i) {
     '</div><div class="hint" style="margin-top:6px">' + cap + " · " + esc(dir) + "</div></td>";
   return tr;
 }
+$("pgsize").addEventListener("change", () => {
+  TBL.size = +$("pgsize").value;
+  TBL.page = 0;
+  if (S.results) renderTable();
+});
+$("pgprev").addEventListener("click", () => { TBL.page--; if (S.results) renderTable(); });
+$("pgnext").addEventListener("click", () => { TBL.page++; if (S.results) renderTable(); });
+var _tblTimer = null;
+document.querySelectorAll(".filterrow input").forEach((el) =>
+  el.addEventListener("input", () => {
+    TBL.filters[el.dataset.f] = el.value;
+    clearTimeout(_tblTimer);
+    _tblTimer = setTimeout(() => { TBL.idx = null; TBL.page = 0; if (S.results) renderTable(); }, 180);
+  }));
 $("resbody").addEventListener("click", (e) => {
   if (PHOTOS_STATE !== "ok") return;
   const tr = e.target.closest("tr.ev");

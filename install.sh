@@ -12,10 +12,53 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="${HOME}/.local/bin"
 DESKTOP_DIR="${HOME}/Desktop"
-# Capture the active Python (the virtual environment's, if one is active) by its
-# full path, so the launcher and Desktop icon use it directly without the user
-# having to activate the environment first.
-PYTHON="${PYTHON:-$(command -v python3 || echo python3)}"
+
+# Find the Python that runs DeepFaune, by full path, so the launcher and the
+# Desktop icon work without activating anything first. An explicit PYTHON=...
+# always wins. Otherwise candidates are tried in order - the active virtual
+# environment, a .venv or venv inside the repo, the Python an existing
+# launcher already uses, then the system python3 - and the first that can
+# import torch is chosen. Torch is the test because it is what separates the
+# DeepFaune environment from a bare system Python; picking the wrong one here
+# once broke the launcher when the installer was re-run outside the venv.
+find_python() {
+  candidates=""
+  [ -n "${VIRTUAL_ENV:-}" ] && candidates="${candidates}${VIRTUAL_ENV}/bin/python3
+"
+  candidates="${candidates}${REPO_DIR}/.venv/bin/python3
+${REPO_DIR}/venv/bin/python3
+"
+  if [ -f "${BIN_DIR}/dfrun" ]; then
+    prev="$(sed -n 's/^exec "\(.*python[^"]*\)".*/\1/p' "${BIN_DIR}/dfrun" | head -n 1)"
+    [ -n "${prev}" ] && candidates="${candidates}${prev}
+"
+  fi
+  candidates="${candidates}$(command -v python3 || echo python3)
+"
+  first_existing=""
+  printf '%b' "${candidates}" | while IFS= read -r c; do
+    [ -n "${c}" ] && [ -x "${c}" ] || continue
+    if "${c}" -c "import torch" >/dev/null 2>&1; then printf '%s
+' "${c}"; return 0; fi
+  done | head -n 1
+}
+if [ -z "${PYTHON:-}" ]; then
+  PYTHON="$(find_python || true)"
+  if [ -z "${PYTHON}" ]; then
+    # Nothing can import torch; take the first candidate that exists at all.
+    for c in "${VIRTUAL_ENV:+${VIRTUAL_ENV}/bin/python3}"              "${REPO_DIR}/.venv/bin/python3" "${REPO_DIR}/venv/bin/python3"              "$(command -v python3 || echo python3)"; do
+      [ -n "${c}" ] && [ -x "${c}" ] && { PYTHON="${c}"; break; }
+    done
+    PYTHON="${PYTHON:-python3}"
+    echo "WARNING: no Python with torch found; using ${PYTHON}."
+    echo "         The worker needs the DeepFaune environment. If it lives elsewhere,"
+    echo "         re-run as: PYTHON=/path/to/venv/bin/python3 bash install.sh"
+  fi
+fi
+echo "Using Python: ${PYTHON}"
+if ! "${PYTHON}" -c "import torch" >/dev/null 2>&1; then
+  echo "WARNING: ${PYTHON} cannot import torch; the classifier will not run with it."
+fi
 
 # 1. Launcher on PATH.
 mkdir -p "${BIN_DIR}"

@@ -245,10 +245,14 @@ next to the page, or one loaded via the map panel's picker, replaces the
 embedded set. Because the `score_*` columns
 hold the complete distribution over every animal class, it re-derives
 predictions rather than just filtering the ones already written: set a global
-or per-species confidence threshold (typed or by slider), require a minimum
-sequence length in seconds, untick species that cannot occur so their
-detections fall to the next-best species, and switch scope between the
-official survey (Camera Trap Monitoring/Collections) and all images. The
+or per-species confidence threshold (typed or by slider), regroup the whole
+archive with a different sequence gap (the maxlag used at classification is
+not baked in: entering a gap re-reads the file and rechains photographs into
+events with the engine's own rule; blank keeps the original grouping), untick
+species that cannot occur so their detections fall to the next-best species,
+and switch scope between the official survey (Camera Trap
+Monitoring/Collections) and all images. Per-species minimum-length overrides
+in the species table drop events shorter than a given number of seconds. The
 events table lists events oldest first, shows the top three species with
 scores to three decimal places (naming the top choice even when it scored
 below the threshold, shown in red rather than hidden behind "undefined"),

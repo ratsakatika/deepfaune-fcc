@@ -43,7 +43,7 @@ TOOL_NAME = "dfrun"
 # for medium features, first for complete overhauls. See CLAUDE.md
 # ("Versioning") - the self-updater shows this to users, so a stale number
 # makes different code report the same version.
-TOOL_VERSION = "1.5.9"
+TOOL_VERSION = "1.5.10"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -1532,7 +1532,19 @@ def stage_configure(args, out_dir, argv=None, source=None):
     _print_params(params)
     if args.yes:
         return params
-    print("\nAdjust the settings. Press Enter to keep each suggested value.")
+    if previous:
+        # Resuming: one keypress reuses the run's own settings. Only an
+        # explicit "n" opens the per-setting prompts (for the safe knobs such
+        # as cores); mid-run changes to the science settings are what caused
+        # the settings drift this flow was built to prevent.
+        reply = _default_prompt(
+            "Reuse the current run's settings and continue? [Y/n] "
+        ).strip().lower()
+        if reply in ("", "y", "yes"):
+            return params
+        print("\nAdjust the settings. Press Enter to keep each suggested value.")
+    else:
+        print("\nAdjust the settings. Press Enter to keep each suggested value.")
     params["detector"] = prompt_setting(
         "Detector: the model that finds animals before they are named. DF is "
         "fastest (default); DFbsMDS is more thorough; DFMDS is most thorough but "

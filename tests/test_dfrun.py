@@ -419,6 +419,50 @@ def test_finish_outputs_removes_legacy_desktop_files(tmp_path, monkeypatch, caps
     assert "superseded" in capsys.readouterr().out
 
 
+def _resume_meta(tmp_path):
+    import json
+    meta = {"detector": "DFbsMDS", "birds": False, "threshold": 0.8, "maxlag": 60,
+            "threads": 3, "excluded_classes": ["ibex"],
+            "utc_start_time": "2026-08-31T14:47:00"}
+    (tmp_path / "run_metadata.p0.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def test_stage_configure_resume_is_one_keypress(tmp_path, monkeypatch):
+    _resume_meta(tmp_path)
+    prompts = []
+    monkeypatch.setattr(dfrun, "_default_prompt", lambda m: (prompts.append(m), "")[1])
+    args = dfrun.build_arg_parser().parse_args([])
+    params = dfrun.stage_configure(args, str(tmp_path), argv=[])
+    assert params is not None
+    assert params["detector"] == "DFbsMDS" and params["threads"] == 3
+    assert params["exclude_classes"] == ["ibex"]
+    # One prompt only: the reuse confirmation, no per-setting questions.
+    assert len(prompts) == 1 and "Reuse" in prompts[0]
+
+
+def test_stage_configure_resume_n_opens_adjustment(tmp_path, monkeypatch):
+    _resume_meta(tmp_path)
+    answers = iter(["n", "", "", "", "", "", "4", "", ""])   # adjust: change threads to 4
+    prompts = []
+    monkeypatch.setattr(dfrun, "_default_prompt", lambda m: (prompts.append(m), next(answers))[1])
+    args = dfrun.build_arg_parser().parse_args([])
+    params = dfrun.stage_configure(args, str(tmp_path), argv=[])
+    assert params is not None
+    assert params["threads"] == 4                 # the adjusted knob
+    assert params["detector"] == "DFbsMDS"        # everything else kept
+    assert any("Proceed with these settings?" in m for m in prompts)
+
+
+def test_stage_configure_fresh_run_still_prompts(tmp_path, monkeypatch):
+    prompts = []
+    monkeypatch.setattr(dfrun, "_default_prompt", lambda m: (prompts.append(m), "")[1])
+    args = dfrun.build_arg_parser().parse_args([])
+    params = dfrun.stage_configure(args, str(tmp_path), argv=[])
+    assert params is not None
+    assert not any("Reuse" in m for m in prompts)
+    assert any("Detector" in m for m in prompts)
+
+
 # ---------------------------------------------------------------------------
 # --diagnose verdicts (pure logic over status + flight recorder)
 # ---------------------------------------------------------------------------

@@ -8,11 +8,18 @@ the official DeepFaune v1.4.1 engine. Field machines self-update by pulling
 
 `TOOL_VERSION` in `dfrun.py` is the user-visible version shown in the banner.
 **Increment it in the same commit as any change merged to main**, using the
-owner's scheme: bump the THIRD digit (x.x.1) for small updates and fixes,
-the SECOND digit (x.1.0) for medium features, and the FIRST digit (2.0.0)
-only for complete overhauls. Never merge behaviour changes that leave the
-version untouched - users then report "1.x.y" for two different programs,
+owner's scheme: the DEFAULT is the THIRD digit (x.x.1) - fixes, refinements,
+dashboard/HTML changes, anything short of a new capability in the batch tool
+itself. The SECOND digit (x.1.0) is reserved for a genuinely new capability
+the owner would announce, and the FIRST digit (2.0.0) for complete overhauls.
+When unsure, bump the third digit. Never merge behaviour changes that leave
+the version untouched - users then report "1.x.y" for two different programs,
 which has already caused confusion.
+
+Note: versions 1.6.0-1.10.0 over-counted a run of small updates as second-digit
+bumps; the owner reset the line to 1.5.4 on 2026-08-31. That reset was
+deliberate - do not "correct" the version upward past history, just keep
+incrementing from the current value.
 
 ## Ground rules
 

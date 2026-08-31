@@ -350,7 +350,7 @@ def test_absolute_eta():
 
 
 # ---------------------------------------------------------------------------
-# dashboard integration
+# desktop master
 # ---------------------------------------------------------------------------
 def test_ensure_desktop_master_regenerates(tmp_path, monkeypatch):
     out = tmp_path / "out"
@@ -369,43 +369,6 @@ def test_ensure_desktop_master_regenerates(tmp_path, monkeypatch):
         rows = list(csv.reader(handle))
     assert rows[0] == dfrun.dfb.CSV_HEADER + [dfrun.dfb.SEQUENCE_ID_COLUMN]
     assert any(r[3] == "wolf" for r in rows[1:])
-
-
-def test_dashboard_command_builds_expected_invocation(tmp_path, monkeypatch):
-    software = tmp_path / "sw"
-    software.mkdir()
-    (software / dfrun.DASHBOARD_BUILDER).write_text("# builder\n", encoding="utf-8")
-    (software / dfrun.PROTOCOL_NAME).write_text("xlsx", encoding="utf-8")
-    out = tmp_path / "out"
-    out.mkdir()
-    desktop = tmp_path / "Desktop"
-    desktop.mkdir()
-    monkeypatch.setattr(dfrun, "DESKTOP_DIR", str(desktop))
-    _write_shard(
-        out / "a__0a1b2c3d.csv",
-        [["/x/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0]],
-    )
-    cmd, out_html = dfrun.dashboard_command(str(software), str(out))
-    assert cmd is not None
-    assert cmd[1] == str(software / dfrun.DASHBOARD_BUILDER)
-    assert cmd[2] == str(desktop / dfrun.DESKTOP_MASTER)   # detections = Desktop master
-    assert cmd[3] == str(software / dfrun.PROTOCOL_NAME)
-    assert cmd[4] == str(desktop / dfrun.DESKTOP_DASHBOARD)
-    assert out_html == str(desktop / dfrun.DESKTOP_DASHBOARD)
-
-
-def test_dashboard_command_missing_builder(tmp_path, monkeypatch):
-    monkeypatch.setattr(dfrun, "DESKTOP_DIR", str(tmp_path / "Desktop"))
-    out = tmp_path / "out"
-    out.mkdir()
-    _write_shard(out / "a__0a1b2c3d.csv", [["/x/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0]])
-    cmd, out_html = dfrun.dashboard_command(str(tmp_path / "no_software"), str(out))
-    assert cmd is None and out_html is None
-
-
-def test_build_dashboard_missing_builder_returns_none(tmp_path, monkeypatch):
-    monkeypatch.setattr(dfrun, "DESKTOP_DIR", str(tmp_path / "Desktop"))
-    assert dfrun.build_dashboard(str(tmp_path / "no_software"), str(tmp_path)) is None
 
 
 def test_parse_detector():
@@ -445,15 +408,23 @@ def test_prompt_setting_keep_change_invalid(monkeypatch):
     assert dfrun.prompt_setting("e", "L", 4, dfrun.parse_pos_int) == 4
 
 
-def test_maybe_rebuild_dashboard_guards(tmp_path, monkeypatch):
-    # No change in mtime: no build, returns the same handle.
-    monkeypatch.setattr(dfrun, "spawn_dashboard", lambda *a: pytest.fail("should not build"))
-    assert dfrun._maybe_rebuild_dashboard("/sw", str(tmp_path), 100.0, 100.0, None) is None
-    # No software dir: no build.
-    assert dfrun._maybe_rebuild_dashboard(None, str(tmp_path), 200.0, 100.0, None) is None
-    # Low memory: no build.
-    monkeypatch.setattr(dfrun, "enough_memory_for_dashboard", lambda: False)
-    assert dfrun._maybe_rebuild_dashboard("/sw", str(tmp_path), 200.0, 100.0, None) is None
+def test_finish_outputs_removes_legacy_desktop_files(tmp_path, monkeypatch, capsys):
+    out = tmp_path / "out"
+    out.mkdir()
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    monkeypatch.setattr(dfrun, "DESKTOP_DIR", str(desktop))
+    _write_shard(
+        out / "a__0a1b2c3d.csv",
+        [["/x/1.jpg", "d", 1, "wolf", 0.9, "wolf", 0.9, 1, 0]],
+    )
+    for name in dfrun.DESKTOP_LEGACY:
+        (desktop / name).write_text("stale", encoding="utf-8")
+    dfrun.finish_outputs(str(out), software_dir=None)
+    for name in dfrun.DESKTOP_LEGACY:
+        assert not (desktop / name).exists()
+    assert (desktop / dfrun.DESKTOP_MASTER).exists()
+    assert "superseded" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

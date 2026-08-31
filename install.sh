@@ -57,26 +57,28 @@ EOF
   echo "Installed Desktop shortcut: ${DESKTOP_FILE}"
   echo "First time only: right-click the icon and choose 'Allow Launching' so GNOME trusts it."
 
-  # Friendly plain-English guide on the Desktop.
+  # Friendly plain-English guide on the Desktop. A symlink into the repo, so
+  # every self-update refreshes it with no copying.
   if [ -f "${REPO_DIR}/docs/USER_GUIDE.html" ]; then
-    cp "${REPO_DIR}/docs/USER_GUIDE.html" "${DESKTOP_DIR}/How_to_use_dfrun.html"
-    echo "Installed guide: ${DESKTOP_DIR}/How_to_use_dfrun.html"
+    ln -sfn "${REPO_DIR}/docs/USER_GUIDE.html" "${DESKTOP_DIR}/How_to_use_dfrun.html"
+    echo "Linked guide: ${DESKTOP_DIR}/How_to_use_dfrun.html -> repo copy"
   fi
 
-  # Dashboard and result filter: opens in a browser, reads the master CSV locally.
+  # Dashboard and result filter: opens in a browser, reads the master CSV
+  # locally. Also a symlink, so it always matches the installed version.
   if [ -f "${REPO_DIR}/dashboard_and_filter.html" ]; then
-    cp "${REPO_DIR}/dashboard_and_filter.html" "${DESKTOP_DIR}/dashboard_and_filter.html"
-    echo "Installed dashboard and filter: ${DESKTOP_DIR}/dashboard_and_filter.html"
-    rm -f "${DESKTOP_DIR}/filter_master_results.html"
+    ln -sfn "${REPO_DIR}/dashboard_and_filter.html" "${DESKTOP_DIR}/dashboard_and_filter.html"
+    echo "Linked dashboard and filter: ${DESKTOP_DIR}/dashboard_and_filter.html -> repo copy"
+    rm -f "${DESKTOP_DIR}/filter_master_results.html" "${DESKTOP_DIR}/deepfaune_dashboard.html"
   fi
 else
   echo "No ${DESKTOP_DIR}; skipped the Desktop shortcut."
 fi
 
-# 3. Runtime extras for the live screen and the dashboard.
-if ! "${PYTHON}" -c "import rich, psutil, plotly" 2>/dev/null; then
-  echo "NOTE: the live screen and dashboard need 'rich', 'psutil' and 'plotly'. Install with:"
-  echo "      ${PYTHON} -m pip install rich psutil plotly openpyxl"
+# 3. Runtime extras for the live screen.
+if ! "${PYTHON}" -c "import rich, psutil" 2>/dev/null; then
+  echo "NOTE: the live screen needs 'rich' and 'psutil'. Install with:"
+  echo "      ${PYTHON} -m pip install rich psutil"
 fi
 
 echo "Done. Run 'dfrun' to start (or use the Desktop shortcut)."

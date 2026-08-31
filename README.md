@@ -31,13 +31,14 @@ guide is here: [docs/USER_GUIDE.html](docs/USER_GUIDE.html). In short:
    new value and press Enter.
 4. Processing runs on the computer. You may close the window or disconnect (if connected remotely); it
    continues. Open the icon again at any time to view progress.
-5. When it finishes, the dashboard opens in a web browser and the result files
-   are on the desktop. If it stops, open the icon again to resume.
+5. When it finishes, the result files are on the desktop; open
+   `dashboard_and_filter.html` in a browser to explore them. If it stops, open
+   the icon again to resume.
 
 In normal use you will not reprocess the whole archive. When you add new
 camera-trap photographs to the hard drive, run the tool again: it processes only
-the new folders and updates the results and the dashboard. That incremental
-update is the main day-to-day use.
+the new folders and updates the results. That incremental update is the main
+day-to-day use.
 
 ## Quick start
 
@@ -45,15 +46,17 @@ update is the main day-to-day use.
    DeepFaune documentation below), then add the front-end extras:
    `pip install rich psutil plotly openpyxl`.
 2. Put the tool on PATH and add a Desktop shortcut: `make install`
-   (or `bash install.sh`). The first time you use the Desktop icon, right-click
+   (or `bash install.sh`). The guide and `dashboard_and_filter.html` are placed
+   on the Desktop as symlinks into the checkout, so every self-update refreshes
+   them automatically. The first time you use the Desktop icon, right-click
    it and choose "Allow Launching" so GNOME trusts it.
 3. Plug in the archive drive (mounted read-only) and run `dfrun`.
 4. Follow the stages: it checks for a newer version, finds the drive, reports
    how much is already done, asks you to confirm the settings, then launches.
 5. Watch the live readout. You can close the window or disconnect (if connected
    remotely); the run keeps going. Re-run `dfrun` to reattach to it.
-6. When it finishes, a dashboard opens in your browser and the
-   spreadsheet-friendly outputs are on your Desktop.
+6. When it finishes, the spreadsheet-friendly outputs are on your Desktop,
+   with `dashboard_and_filter.html` to explore them in a browser.
 
 To resume after any stop, just run `dfrun` again; finished shards are skipped.
 
@@ -118,8 +121,8 @@ resumed consistently.
   memory.
 - **threads** - how many processor cores are used. More is faster but uses more
   memory and runs hotter; capping it also bounds memory use.
-- **merge-every** - how often, in seconds, the master CSV and dashboard are
-  rebuilt during a run. This affects how often you see progress, not the results.
+- **merge-every** - how often, in seconds, the master CSV is rebuilt during a
+  run. This affects how often you see progress, not the results.
 
 Note on consistency: the first long run used threshold 0.5 and maxlag 20, and
 the tool now defaults to exactly that, so a continued run stays consistent with
@@ -142,7 +145,8 @@ On the Desktop, for easy download:
 - `deepfaune_master.csv` (every image; too large for Excel, open it in R);
 - `deepfaune_wildlife.csv` (animals only; within the spreadsheet row limit);
 - `deepfaune_summary.csv` (per-species and per-station counts);
-- `deepfaune_dashboard.html` (interactive charts and a camera map; opens in a browser).
+- `dashboard_and_filter.html` (the interactive dashboard and result filter; a
+  symlink into the checkout, so it always matches the installed version).
 
 ### Result columns
 
@@ -174,7 +178,8 @@ changed retrospectively without re-running anything:
   alone is not unique**: the engine numbers sequences per folder, restarting
   at 1 in every one, so seqnum 1 recurs about once per folder across the
   archive. Group by `sequence_id` (or by folder plus `seqnum`) when counting
-  events, never by `seqnum` on its own. The dashboard already does this.
+  events, never by `seqnum` on its own. `dashboard_and_filter.html` already
+  does this.
 
 `sequence_id` and the image paths are derived when the master and Desktop
 CSVs are built rather than in the shards, so they apply uniformly to every
@@ -187,16 +192,6 @@ columns (or `score_seq`) clears your new cut-off, using `top1_seq` as the
 label. Shards written by older versions of the tool lack the raw-score
 columns; in the merged master those cells are simply blank. Re-run those
 folders with `deepfaune_batch.py --rescan` if you need their raw scores too.
-
-## Dashboard
-
-`deepfaune_dashboard.html` is built from the Desktop master CSV by
-`build_dashboard.py`, with the camera map placed from
-`FieldProtocols_WTM_FAR_23.xlsx` in the software directory (the map is omitted if
-the protocol is absent). It opens automatically when a run finishes, and is
-rebuilt in the background each time the master is updated, so you can open it
-early to watch the results grow. To rebuild it on demand without a run, use
-`dfrun --dashboard`.
 
 ## Diagnostics and self-protection
 
@@ -273,6 +268,11 @@ The seasonal chart and the map load their libraries (Plotly, Leaflet) from
 public CDNs, so those two panels need an internet connection the first time;
 everything else works offline. Events are grouped by `sequence_id`.
 
+This page supersedes the Python-built `deepfaune_dashboard.html`: dfrun no
+longer builds that file, and the output step removes a stale copy from the
+Desktop (`build_dashboard.py` remains in the repository and can still be run
+by hand if ever needed).
+
 ## Auto-resume service
 
 `dfrun --install-service` installs a systemd unit, `deepfaune-worker.service`,
@@ -303,7 +303,7 @@ the shared pidfile means the service and manual runs never double-classify.
   has a CSV is skipped, so stopping and restarting is safe.
 - Incremental: because finished folders are skipped, adding new photographs to
   the drive and running again classifies only the new folders and refreshes the
-  outputs and dashboard. The full archive is not reprocessed.
+  outputs. The full archive is not reprocessed.
 - CPU only: CUDA is disabled before torch is imported and the device is forced
   to cpu.
 - The source drive is read-only and is never written to; all outputs go to

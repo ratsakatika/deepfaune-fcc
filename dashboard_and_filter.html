@@ -237,8 +237,10 @@ tr.photorow td{background:var(--night2);white-space:normal}
 <section class="section off" id="p-filter">
   <div class="section-head"><span class="n">02</span><h2>Filters</h2>
     <span class="hint" id="candcount"></span></div>
-  <p class="lead">Predictions are re-derived from the stored score distribution, so thresholds and
-  species exclusions apply retrospectively to the whole archive without reclassifying anything.</p>
+  <p class="lead">An <b>event</b> is one camera visit: consecutive photographs at the same
+  camera, chained together while each is within the sequence gap of the previous one.
+  Everything on this page counts events, and predictions are re-derived from the stored
+  scores, so every setting here applies retrospectively without reclassifying anything.</p>
   <div class="card">
     <div class="fgrid">
       <div class="field">
@@ -256,10 +258,12 @@ tr.photorow td{background:var(--night2);white-space:normal}
         <span class="lbl">Sequence gap (seconds)</span>
         <input type="number" id="seqgap" min="1" step="1" placeholder="as classified"
                aria-label="Sequence gap in seconds">
-        <div class="sub">Photographs in the same folder within this many seconds of
-        the previous one form a single event. Blank keeps the grouping from
-        classification. Changing it regroups the whole archive on Generate,
-        which re-reads the file (takes about as long as loading did).</div>
+        <div class="sub">Chains photographs into events: each photo within this many
+        seconds of the previous one at the same camera joins the same event. Blank
+        keeps the grouping already in the file (the tool classifies with a
+        60&#8209;second gap by default). Entering any number regroups the whole
+        archive on Generate, which re-reads the file (takes about as long as
+        loading did).</div>
       </div>
       <div class="field" id="scopebar">
         <span class="lbl">Scope</span>
@@ -286,9 +290,11 @@ tr.photorow td{background:var(--night2);white-space:normal}
       species is not deleted from the results &mdash; its events land on the next-best species or on
       &lsquo;undefined&rsquo;, which stay counted while their boxes are ticked. To view a single
       species alone, also untick &lsquo;include events below the threshold&rsquo;, or use the
-      events table&rsquo;s Top&nbsp;1 filter. A <b>gap override</b> merges repeat detections of
-      that species at the same camera within the given seconds into one event (an independence
-      interval); blank means no merging.</p>
+      events table&rsquo;s Top&nbsp;1 filter. The <b>gap override</b> works one level above the
+      sequence gap: the gap chains <i>photographs</i> into events, while a species&rsquo; override
+      then merges <i>whole events</i> of that species at the same camera into one, whenever they
+      fall within the override of each other (an independence interval, useful for animals that
+      trigger a camera repeatedly over minutes or hours). Blank means no merging.</p>
       <div class="checks" style="margin-bottom:10px">
         <button type="button" class="mini" id="sp-all">All species</button>
         <button type="button" class="mini" id="sp-none">None</button>
@@ -332,92 +338,9 @@ tr.photorow td{background:var(--night2);white-space:normal}
 
 <div id="figs" hidden>
 
-<div class="duo">
-<!-- ================= 03 CAMERA GRID ================= -->
-<section class="section" id="sec_map">
-  <div class="section-head"><span class="n">03</span><h2>The camera grid</h2></div>
-  <p class="lead" id="mapLead">The cameras at their real positions. Each circle is a camera; choose
-  &lsquo;All wildlife&rsquo;, &lsquo;All wildlife, humans and vehicles&rsquo; or a single species to size the
-  circles by how many detections each camera made, with empty cameras dimmed. Tap a camera for its
-  details. If the map background does not appear, pick a different style from the control at the top
-  right; the camera markers always work.</p>
-  <div class="controls">
-    <span class="lbl">Show</span><select id="mapSel"></select>
-    <span class="cap" id="protStatus"></span>
-    <span class="savebtns"><button class="mini" id="protView">View protocol</button><button class="mini" id="protPick" hidden>Use a different protocol (.xlsx)</button></span>
-    <input type="file" id="protFile" accept=".xlsx" hidden>
-  </div>
-  <div class="card" id="fig_M"></div>
-  <div id="mapNote" class="hint" style="margin-top:12px"></div>
-</section>
-
-<!-- ================= 04 DAILY RHYTHM ================= -->
-<section class="section" id="sec_clock">
-  <div class="section-head"><span class="n">04</span><h2>Daily rhythm</h2></div>
-  <p class="lead">When animals are active, by hour of day. Each spoke is one hour and its length is
-  the number of detections in that hour; midnight is at the top, noon at the bottom, and the shaded
-  half is night (18:00&ndash;06:00). The centre shows the total for the current choice. Only records
-  carrying a usable time of day are counted here, so these totals are smaller than the figures at
-  the top of the page. Choose &lsquo;All wildlife&rsquo; or a single species; each ring is scaled to its
-  own busiest hour.</p>
-  <div class="controls">
-    <span class="lbl">Show</span><select id="clockSel"></select><span id="clockN" class="cap"></span>
-    <span class="savebtns"><button class="mini" data-save="ring" data-fmt="png">PNG</button><button class="mini" data-save="ring" data-fmt="svg">SVG</button></span>
-  </div>
-  <div class="card" id="fig_A"></div>
-</section>
-</div><!-- /duo -->
-
-<!-- ================= 05 THROUGH THE SEASONS ================= -->
-<section class="section" id="sec_season">
-  <div class="section-head"><span class="n">05</span><h2>Through the seasons</h2></div>
-  <p class="lead">Detection events stacked by ecological group. <b>Timeline</b> shows them week by
-  week across the survey window; <b>By month</b> folds the years onto a single calendar (month of
-  year) so the seasonal pattern stands out. Effort is uneven (cameras ran on different dates), so
-  totals reflect both activity and how many cameras were running. Click a group in the legend to
-  break it down by species.</p>
-  <div class="controls">
-    <div class="toggle" id="seasonTog"><button data-m="T" class="on">Timeline</button><button data-m="S">By month</button></div>
-    <button id="back_D" class="backbtn" style="display:none">&larr;&nbsp;back to groups</button>
-    <span class="savebtns"><button class="mini" data-save="season" data-fmt="png">PNG</button></span>
-  </div>
-  <div class="card" id="fig_D"></div>
-</section>
-
-<!-- ================= 06 WHAT THE CAMERAS SAW ================= -->
-<section class="section" id="sec_species">
-  <div class="section-head"><span class="n">06</span><h2>What the cameras saw</h2></div>
-  <p class="lead">Every species the cameras recorded, as detection events (one per photographic
-  sequence) or as photographs. All taxa are shown, ordered by frequency and coloured by ecological
-  group (matching the season and station panels); domestic animals are muted. Counts are
-  sequence-level, so they differ from a frame-by-frame tally (see notes).</p>
-  <div class="controls">
-    <div class="toggle" id="sbToggle"><button data-m="events" class="on">Events</button><button data-m="images">Photos</button></div>
-    <div class="glegend" id="sbLegend"></div>
-    <span class="savebtns"><button class="mini" data-save="sbars" data-fmt="png">PNG</button></span>
-  </div>
-  <div class="card" id="speciesBars"></div>
-  <div class="hint" style="margin-top:12px">Domestic animals (cattle, dogs, sheep, goats, cats, horses)
-  are shown muted. Click a group in the legend to hide or show it; hover a bar for events, photos and
-  mean confidence.</div>
-</section>
-
-<!-- ================= 07 BUSIEST CAMERAS ================= -->
-<section class="section" id="sec_stations">
-  <div class="section-head"><span class="n">07</span><h2>Busiest cameras</h2></div>
-  <p class="lead" id="stLead">Every camera station, ordered by total detection events, each bar split
-  by ecological group. Bar length is the number of detection events (one per photographic sequence);
-  click a group in the legend to hide or show it, and hover a bar for the station total.</p>
-  <div class="controls">
-    <div class="glegend" id="stLegend"></div>
-    <span class="savebtns"><button class="mini" data-save="stbars" data-fmt="png">PNG</button></span>
-  </div>
-  <div class="card" id="stationBars"></div>
-</section>
-
-<!-- ================= 08 EVENTS ================= -->
+<!-- ================= 03 EVENTS ================= -->
 <section class="section" id="sec_events">
-  <div class="section-head"><span class="n">08</span><h2>Events</h2>
+  <div class="section-head"><span class="n">03</span><h2>Events</h2>
     <span class="hint" id="resstamp"></span></div>
   <p class="lead" id="tablenote"></p>
   <p class="tlegend" id="legend"></p>
@@ -450,13 +373,96 @@ tr.photorow td{background:var(--night2);white-space:normal}
   </div>
 </section>
 
+<div class="duo">
+<!-- ================= 04 CAMERA GRID ================= -->
+<section class="section" id="sec_map">
+  <div class="section-head"><span class="n">04</span><h2>The camera grid</h2></div>
+  <p class="lead" id="mapLead">The cameras at their real positions. Each circle is a camera; choose
+  &lsquo;All wildlife&rsquo;, &lsquo;All wildlife, humans and vehicles&rsquo; or a single species to size the
+  circles by how many detections each camera made, with empty cameras dimmed. Tap a camera for its
+  details. If the map background does not appear, pick a different style from the control at the top
+  right; the camera markers always work.</p>
+  <div class="controls">
+    <span class="lbl">Show</span><select id="mapSel"></select>
+    <span class="cap" id="protStatus"></span>
+    <span class="savebtns"><button class="mini" id="protView">View protocol</button><button class="mini" id="protPick" hidden>Use a different protocol (.xlsx)</button></span>
+    <input type="file" id="protFile" accept=".xlsx" hidden>
+  </div>
+  <div class="card" id="fig_M"></div>
+  <div id="mapNote" class="hint" style="margin-top:12px"></div>
+</section>
+
+<!-- ================= 05 DAILY RHYTHM ================= -->
+<section class="section" id="sec_clock">
+  <div class="section-head"><span class="n">05</span><h2>Daily rhythm</h2></div>
+  <p class="lead">When animals are active, by hour of day. Each spoke is one hour and its length is
+  the number of detections in that hour; midnight is at the top, noon at the bottom, and the shaded
+  half is night (18:00&ndash;06:00). The centre shows the total for the current choice. Only records
+  carrying a usable time of day are counted here, so these totals are smaller than the figures at
+  the top of the page. Choose &lsquo;All wildlife&rsquo; or a single species; each ring is scaled to its
+  own busiest hour.</p>
+  <div class="controls">
+    <span class="lbl">Show</span><select id="clockSel"></select><span id="clockN" class="cap"></span>
+    <span class="savebtns"><button class="mini" data-save="ring" data-fmt="png">PNG</button><button class="mini" data-save="ring" data-fmt="svg">SVG</button></span>
+  </div>
+  <div class="card" id="fig_A"></div>
+</section>
+</div><!-- /duo -->
+
+<!-- ================= 06 THROUGH THE SEASONS ================= -->
+<section class="section" id="sec_season">
+  <div class="section-head"><span class="n">06</span><h2>Through the seasons</h2></div>
+  <p class="lead">Events stacked by ecological group. <b>Timeline</b> shows them week by
+  week across the survey window; <b>By month</b> folds the years onto a single calendar (month of
+  year) so the seasonal pattern stands out. Effort is uneven (cameras ran on different dates), so
+  totals reflect both activity and how many cameras were running. Click a group in the legend to
+  break it down by species.</p>
+  <div class="controls">
+    <div class="toggle" id="seasonTog"><button data-m="T" class="on">Timeline</button><button data-m="S">By month</button></div>
+    <button id="back_D" class="backbtn" style="display:none">&larr;&nbsp;back to groups</button>
+    <span class="savebtns"><button class="mini" data-save="season" data-fmt="png">PNG</button></span>
+  </div>
+  <div class="card" id="fig_D"></div>
+</section>
+
+<!-- ================= 07 WHAT THE CAMERAS SAW ================= -->
+<section class="section" id="sec_species">
+  <div class="section-head"><span class="n">07</span><h2>What the cameras saw</h2></div>
+  <p class="lead">Every species the cameras recorded, counted as events or as photographs.
+  All taxa are shown, ordered by frequency and coloured by ecological group (matching the
+  season and station panels); domestic animals are muted. Counting events rather than
+  photographs stops long bursts dominating the totals (see notes).</p>
+  <div class="controls">
+    <div class="toggle" id="sbToggle"><button data-m="events" class="on">Events</button><button data-m="images">Photos</button></div>
+    <div class="glegend" id="sbLegend"></div>
+    <span class="savebtns"><button class="mini" data-save="sbars" data-fmt="png">PNG</button></span>
+  </div>
+  <div class="card" id="speciesBars"></div>
+  <div class="hint" style="margin-top:12px">Domestic animals (cattle, dogs, sheep, goats, cats, horses)
+  are shown muted. Click a group in the legend to hide or show it; hover a bar for events, photos and
+  mean confidence.</div>
+</section>
+
+<!-- ================= 08 BUSIEST CAMERAS ================= -->
+<section class="section" id="sec_stations">
+  <div class="section-head"><span class="n">08</span><h2>Busiest cameras</h2></div>
+  <p class="lead" id="stLead">Every camera station, ordered by total events, each bar split
+  by ecological group. Click a group in the legend to hide or show it, and hover a bar for
+  the station total.</p>
+  <div class="controls">
+    <div class="glegend" id="stLegend"></div>
+    <span class="savebtns"><button class="mini" data-save="stbars" data-fmt="png">PNG</button></span>
+  </div>
+  <div class="card" id="stationBars"></div>
+</section>
+
 </div><!-- /figs -->
 
 <footer>
 <h3>Notes &amp; method</h3>
-<p><b>Unit of analysis.</b> Consecutive frames sharing a sequence number within a folder form one
-photographic sequence (burst); each sequence counts as one detection event, since burst frames are
-not independent records of separate visits. Events are grouped by <i>sequence_id</i>; if the CSV
+<p><b>Unit of analysis.</b> An event is one camera visit: consecutive photographs at the same
+camera chained by the sequence gap. A burst of frames counts once, since burst frames are not
+independent records of separate visits. Events are identified by <i>sequence_id</i>; if the CSV
 predates that column, the folder path and seqnum are used instead.</p>
 <p><b>Filtering.</b> Every panel reflects the current filters: predictions are re-derived from the
 per-class <i>score_*</i> columns, so thresholds and species exclusions apply retrospectively and
@@ -513,14 +519,17 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
           whether those undefined events stay in the results (shown in red in the table, and in
           the grey &lsquo;unidentified&rsquo; group in the charts) or are dropped entirely; they
           are dropped by default.</li>
-        <li><b>Sequence gap</b> - the rule that chains photographs into events: each photo
-          within this many seconds of the previous one (in the same folder) joins the same
-          event, so an event can last far longer than the gap when an animal lingers. Blank
-          keeps the grouping baked in at classification; entering a number regroups the whole
-          archive by re-reading the file, so Generate takes about as long as the original
-          load. The per-species <b>gap override</b> boxes in the species table go further:
-          repeat detections of that species at the same camera within the override merge into
-          one event (an independence interval), re-scored from the combined photographs.</li>
+        <li><b>Sequence gap</b> - the rule that chains <i>photographs</i> into events: each
+          photo within this many seconds of the previous one at the same camera joins the same
+          event, so an event can last far longer than the gap when an animal lingers. The tool
+          classifies with a 60&#8209;second gap by default; blank keeps whatever grouping is in
+          the file, and entering a number regroups the whole archive by re-reading the file, so
+          Generate takes about as long as the original load.</li>
+        <li><b>Gap override</b> (per species, in the species table) - works one level above the
+          sequence gap: it merges <i>whole events</i> of that species at the same camera into
+          one, whenever they fall within the override of each other. Use it as an independence
+          interval for animals that trigger a camera repeatedly over minutes or hours. Merged
+          events are re-scored from their combined photographs.</li>
         <li><b>Scope</b> - the official survey is the drive's <i>Camera Trap
           Monitoring/Collections</i> folder; &lsquo;All images&rsquo; adds everything else on the
           drive. Out-of-scope events are counted in &lsquo;Events filtered out&rsquo;, which is why
@@ -538,9 +547,10 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
         <li><b>Events filtered out</b> - everything the current filters removed, with the
           reasons listed under the figure: outside the chosen scope, recycle-bin files,
           excluded categories (empty / human / vehicle / below-threshold).</li>
-        <li>An event is one photographic <b>sequence</b> (burst), so bursts are counted once.
-          <code>sequence_id</code> is a short code for the folder plus the sequence number,
-          because the plain sequence number restarts at 1 in every folder and is not unique.</li>
+        <li>An <b>event</b> is one camera visit (a chained run of photographs), so a burst of
+          frames counts once. <code>sequence_id</code> identifies an event uniquely: a short
+          code for the camera folder plus the sequence number, because the plain sequence
+          number restarts at 1 in every folder.</li>
         <li>Events with an implausible date (a dead camera clock stamping 1970) are counted in
           the totals and station panels but left off the time charts.</li>
       </ul>
@@ -1358,10 +1368,9 @@ function buildDerived() {
       { id: stid.replace("WTM_", ""), stid, total: st.tot, segs: [...st.segs] }, stMeta(stid)));
   }
   STATIONS_BARS.sort((a, b) => b.total - a.total);
-  $("stLead").innerHTML = "Every camera station, ordered by total detection events, each bar split " +
-    "by ecological group. All " + STATIONS_BARS.length + " stations with detections are shown. Bar length " +
-    "is the number of detection events (one per photographic sequence); click a group in the legend to " +
-    "hide or show it, and hover a bar for the station total.";
+  $("stLead").innerHTML = "Every camera station, ordered by total events, each bar split " +
+    "by ecological group. All " + STATIONS_BARS.length + " stations with events are shown. " +
+    "Click a group in the legend to hide or show it, and hover a bar for the station total.";
 
   /* --- daily-rhythm ring --- */
   const ringSpecies = [...R.bySpecies.keys()]
@@ -1393,8 +1402,8 @@ function buildDerived() {
   const mSeries = {}; gcols.forEach((g) => { mSeries[g] = [...(R.monthly.get(g) || new Int32Array(12))]; });
   const HOV_W = "week of %{x|%d %b %Y}<br>%{y} {name} events";
   const HOV_M = "%{x}<br>%{y} {name} events";
-  SF = { T: { ov: areaFig(weekX, gcols, wSeries, gc, true, HOV_W, "detection events / week"), dr: {} },
-         S: { ov: areaFig(MLAB, gcols, mSeries, gc, true, HOV_M, "detection events / month"), dr: {} } };
+  SF = { T: { ov: areaFig(weekX, gcols, wSeries, gc, true, HOV_W, "events / week"), dr: {} },
+         S: { ov: areaFig(MLAB, gcols, mSeries, gc, true, HOV_M, "events / month"), dr: {} } };
   for (const g of gcols) {
     const wsg = R.weeklySp.get(g), msg = R.monthlySp.get(g);
     const totals = new Map();
@@ -1405,8 +1414,8 @@ function buildDerived() {
     const scmap = {}; sps.forEach((s) => { scmap[s] = colourFor(s); });
     const wS = {}; sps.forEach((s) => { wS[s] = weekRow(wsg && wsg.get(s)); });
     const mS = {}; sps.forEach((s) => { mS[s] = [...((msg && msg.get(s)) || new Int32Array(12))]; });
-    SF.T.dr[g] = areaFig(weekX, sps, wS, scmap, false, HOV_W, "detection events / week");
-    SF.S.dr[g] = areaFig(MLAB, sps, mS, scmap, false, HOV_M, "detection events / month");
+    SF.T.dr[g] = areaFig(weekX, sps, wS, scmap, false, HOV_W, "events / week");
+    SF.S.dr[g] = areaFig(MLAB, sps, mS, scmap, false, HOV_M, "events / month");
   }
 
   /* --- camera-grid map --- */
@@ -1418,7 +1427,7 @@ function renderStatsPlaceholder() {
   $("statsblock").hidden = false;
   $("thesisWait").hidden = false;
   $("thesisFull").hidden = true;
-  const KPI = ["Images in kept events", "Photo sequences", "Animal &amp; human detections",
+  const KPI = ["Photographs in kept events", "Events kept", "Animal &amp; human events",
     "Camera stations", "Animal types", "Events filtered out"];
   $("kpis").innerHTML = KPI.map((k, i) =>
     '<div class="kpi' + (i % 2 ? " alt" : "") + '"><div class="v">&mdash;</div><div class="k">' + k + "</div></div>").join("");
@@ -1436,7 +1445,7 @@ function renderScalars() {
   const B = (v) => "<b>" + v + "</b>";
   const plural = (n, one, many) => fmt(n) + " " + (n === 1 ? one : many);
   $("thesisFull").innerHTML =
-    "The current filters keep " + B(plural(R.events, "detection event", "detection events")) +
+    "The current filters keep " + B(plural(R.events, "event", "events")) +
     ", covering " + B(fmt(R.images) + " photographs") + ". " +
     B(fmt(R.nonEmpty)) + " of the events contain animals, people or vehicles; " +
     B(fmt(R.named)) + " carry a species name, spanning " +
@@ -1447,9 +1456,9 @@ function renderScalars() {
   const why = Object.entries(R.droppedBy).filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1]).map(([k, v]) => k + " " + fmt(v)).join(" · ");
   const KPI = [
-    [fmt(R.images), "Images in kept events", false, ""],
-    [fmt(R.events), "Photo sequences", true, ""],
-    [fmt(R.nonEmpty), "Animal &amp; human detections", false, ""],
+    [fmt(R.images), "Photographs in kept events", false, ""],
+    [fmt(R.events), "Events kept", true, ""],
+    [fmt(R.nonEmpty), "Animal &amp; human events", false, ""],
     [String(stn), "Camera stations", true, ""],
     [String(nAnimalTypes), "Animal types", false, ""],
     [fmt(R.dropped), "Events filtered out", true, why],
@@ -1746,7 +1755,7 @@ function popupHtml(s) {
     '<span class="chip" style="color:' + colourFor(t[0]) + '">' + cap1(t[0]) + " " + t[1] + "</span>").join("") : "";
   const rows = '<div class="row"><span>Wildlife events</span><b>' + fmt(s.tot) + "</b></div>" +
     '<div class="row"><span>Species</span><b>' + s.spn + "</b></div>" +
-    '<div class="row"><span>Sequences</span><b>' + fmt(s.seqs) + "</b></div>" +
+    '<div class="row"><span>All events</span><b>' + fmt(s.seqs) + "</b></div>" +
     (s.score != null ? '<div class="row"><span>Mean conf.</span><b>' + s.score + "</b></div>" : "") +
     (s.setup ? '<div class="row"><span>Start</span><b>' + s.setup + "</b></div>" : "") +
     (s.end ? '<div class="row"><span>End</span><b>' + s.end + "</b></div>" : "");
@@ -1792,7 +1801,7 @@ function initMap() {
   const streets = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png", { maxZoom: 20, subdomains: "abcd", attribution: "© OpenStreetMap contributors © CARTO" });
   const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 17, attribution: "Tiles © Esri" });
   const topo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: 17, attribution: "© OpenTopoMap (CC-BY-SA)" });
-  topo.addTo(MAPOBJ);
+  osm.addTo(MAPOBJ);
   L.control.layers({ "OpenStreetMap": osm, "Streets (offline-safe)": streets, "Satellite": sat, "Terrain": topo }, null, { position: "topright" }).addTo(MAPOBJ);
   setTimeout(() => { MAPOBJ.invalidateSize(); }, 60);
 }

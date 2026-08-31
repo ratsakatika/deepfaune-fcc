@@ -43,7 +43,7 @@ TOOL_NAME = "dfrun"
 # for medium features, first for complete overhauls. See CLAUDE.md
 # ("Versioning") - the self-updater shows this to users, so a stale number
 # makes different code report the same version.
-TOOL_VERSION = "1.5.15"
+TOOL_VERSION = "1.5.16"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -64,14 +64,15 @@ SEARCH_GLOBS = ("/media/{user}/*", "/mnt/*")
 # Memory: offer a swapfile if total swap is below this.
 MIN_TOTAL_SWAP_GIB = 16
 
-# Run parameter defaults. Threshold 0.5 and maxlag 20 match the first long run
+# Run parameter defaults. Threshold 0.5 matches the first long run; the owner
+# settled on a 60-second sequence gap (maxlag) as the standard
 # (and the demo script), so a continued run stays consistent with the shards
 # already classified. (The official GUI uses 0.8/10.)
 DEFAULTS = {
     "detector": "DF",
     "birds": True,
     "threshold": 0.5,
-    "maxlag": 20,
+    "maxlag": 60,
     "batch_size": 8,
     "threads": 4,
     "merge_every": 600,

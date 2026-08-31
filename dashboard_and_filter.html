@@ -27,7 +27,7 @@ h1{font-size:clamp(30px,5vw,50px);line-height:1.03;letter-spacing:-.015em;margin
 h1 .em{color:var(--sodium)}
 .thesis{color:var(--muted);max-width:62ch;margin-top:14px;font-size:15px}
 .thesis b{color:var(--mist);font-weight:600}
-.kpis{margin-top:26px;display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.kpis{margin-top:26px;display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
 .kpi{background:var(--bark);border:1px solid var(--line);border-radius:var(--r);padding:17px 16px;position:relative;overflow:hidden}
 .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--sodium);opacity:.55}
 .kpi.alt::before{background:var(--moon)}
@@ -159,6 +159,16 @@ tr.sp-off td{opacity:.42}
 .tlegend{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint);margin:8px 0 6px}
 .tmuted{color:var(--faint)}
 .off{opacity:.5;pointer-events:none}
+tr.ev.click{cursor:pointer}
+tr.ev.click:hover td{background:#18241e}
+tr.photorow td{background:var(--night2);white-space:normal}
+.pstrip{display:flex;gap:8px;overflow-x:auto;padding:4px 0}
+.pstrip img{height:120px;border-radius:6px;border:1px solid var(--line2);display:block}
+@media (min-width:1080px){
+ .duo{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start}
+ .duo .section{margin-top:42px}
+ .duo #fig_M{height:460px}
+}
 @media (max-width:760px){
  .kpis{grid-template-columns:repeat(2,1fr)}
  .section-head .hint{display:none}
@@ -224,6 +234,9 @@ under the thresholds and species filters you set below.</p>
           <input type="number" id="thrNum" min="0" max="1" step="0.01" value="0.80" aria-label="Confidence threshold">
         </div>
         <div class="sub">Events scoring below this are labelled <i>undefined</i>.</div>
+        <div class="checks" style="margin-top:8px">
+          <label><input type="checkbox" id="inc-undefined" checked> keep below-threshold events</label>
+        </div>
       </div>
       <div class="field">
         <span class="lbl">Minimum sequence length (seconds)</span>
@@ -234,7 +247,6 @@ under the thresholds and species filters you set below.</p>
       <div class="field">
         <span class="lbl">Include non-animal events</span>
         <div class="checks">
-          <label><input type="checkbox" id="inc-undefined" checked> undefined</label>
           <label><input type="checkbox" id="inc-empty"> empty</label>
           <label><input type="checkbox" id="inc-human"> human</label>
           <label><input type="checkbox" id="inc-vehicle"> vehicle</label>
@@ -269,7 +281,8 @@ under the thresholds and species filters you set below.</p>
 <!-- ================= ACTIONS ================= -->
 <div class="actionbar off" id="actions">
   <button id="generate" class="primary">Generate</button>
-  <button id="download" class="mini" disabled>Download filtered results as CSV</button>
+  <button id="download" class="mini" disabled>Download events CSV</button>
+  <button id="download-img" class="mini" disabled>Download images CSV</button>
   <button id="dl-summary" class="mini" disabled>Save species summary (CSV)</button>
   <span class="status" id="actionstatus">Load a file to begin.</span>
   <div class="spacer"></div>
@@ -281,6 +294,7 @@ under the thresholds and species filters you set below.</p>
 
 <div id="figs" hidden>
 
+<div class="duo">
 <!-- ================= 03 CAMERA GRID ================= -->
 <section class="section" id="sec_map">
   <div class="section-head"><span class="n">03</span><h2>The camera grid</h2></div>
@@ -314,6 +328,7 @@ under the thresholds and species filters you set below.</p>
   </div>
   <div class="card" id="fig_A"></div>
 </section>
+</div><!-- /duo -->
 
 <!-- ================= 05 THROUGH THE SEASONS ================= -->
 <section class="section" id="sec_season">
@@ -368,6 +383,7 @@ under the thresholds and species filters you set below.</p>
     <span class="hint" id="resstamp"></span></div>
   <p class="lead" id="tablenote"></p>
   <p class="tlegend" id="legend"></p>
+  <p class="hint" id="photonote" style="margin:0 0 8px"></p>
   <div class="tablewrap">
     <table><thead><tr>
       <th>Top 1</th><th class="num">Score</th><th class="num">Top 2</th>
@@ -537,13 +553,13 @@ const WTM_RE = /(WTM_FAR\d+)/;
 const S = {
   loaded: false, classes: [], K: 0,
   n: 0, cap: 0,
-  id: [], station: [], wtm: [], firstFile: [],
+  id: [], station: [], wtm: [], firstFile: [], files: [],
   nImg: null, nAnimal: null, nHuman: null, nVehicle: null, nEmpty: null,
   flags: null,               /* bit 1: in Collections; bit 2: recycle bin */
   tMin: null, tMax: null, logs: null,
   map: new Map(),
   hasScores: false, rows: 0, results: null,
-  hasColl: false, srcName: "",
+  hasColl: false, srcName: "", src: null,
 };
 let SCOPE = "survey";
 
@@ -568,7 +584,7 @@ function grow(need) {
 
 /* ============================ loading the CSV =========================== */
 async function loadFile(file) {
-  await loadFrom(file.stream().getReader(), file.size, file.name);
+  await loadFrom(file.stream().getReader(), file.size, file.name, { file });
 }
 
 /* When the page is served over HTTP from the out-dir (python3 -m http.server),
@@ -580,21 +596,21 @@ async function tryAutoLoad() {
     const resp = await fetch("deepfaune_master.csv");
     if (!resp.ok || !resp.body) return;
     const size = +(resp.headers.get("content-length") || 0);
-    await loadFrom(resp.body.getReader(), size, "deepfaune_master.csv (auto-loaded)");
+    await loadFrom(resp.body.getReader(), size, "deepfaune_master.csv (auto-loaded)", { url: "deepfaune_master.csv" });
   } catch (e) { /* no master file next to the page - the picker still works */ }
 }
 
-async function loadFrom(reader, totalBytes, label) {
+async function loadFrom(reader, totalBytes, label, src) {
   $("filemeta").hidden = false;
   $("filemeta").textContent = label + (totalBytes ? " · " + humanBytes(totalBytes) : "");
   $("loadnote").hidden = true;
   $("loadprog").hidden = false;
   setBar("loadbar", 0);
 
-  Object.assign(S, { loaded: false, n: 0, cap: 0, id: [], station: [], wtm: [], firstFile: [],
+  Object.assign(S, { loaded: false, n: 0, cap: 0, id: [], station: [], wtm: [], firstFile: [], files: [],
     nImg: null, nAnimal: null, nHuman: null, nVehicle: null, nEmpty: null, flags: null,
     tMin: null, tMax: null, logs: null, map: new Map(), rows: 0, results: null,
-    hasColl: false, srcName: label.replace(" (auto-loaded)", "") });
+    hasColl: false, srcName: label.replace(" (auto-loaded)", ""), src: src || null });
 
   const decoder = new TextDecoder("utf-8");
   let remainder = "", read = 0, header = null, col = {}, scoreIdx = [], seqCol = -1;
@@ -634,7 +650,7 @@ async function loadFrom(reader, totalBytes, label) {
       S.map.set(key, i);
       const m = fn.match(WTM_RE);
       S.id[i] = key; S.station[i] = stationOf(fn); S.wtm[i] = m ? m[1] : "";
-      S.firstFile[i] = fn;
+      S.firstFile[i] = fn; S.files[i] = [];
       S.tMin[i] = Infinity; S.tMax[i] = -Infinity;
       let fl = 0;
       if (fn.indexOf("Camera Trap Monitoring/Collections") !== -1) { fl |= 1; S.hasColl = true; }
@@ -643,6 +659,7 @@ async function loadFrom(reader, totalBytes, label) {
     }
     S.rows++;
     S.nImg[i]++;
+    if (S.files[i].length < 12) S.files[i].push(fn.slice(fn.lastIndexOf("/") + 1));
     const d = parseExif(p[col.date]);
     if (d) { const t = d.getTime(); if (t < S.tMin[i]) S.tMin[i] = t; if (t > S.tMax[i]) S.tMax[i] = t; }
 
@@ -715,7 +732,8 @@ function note(id, kind, html) {
 function enable(id) { $(id).classList.remove("off"); }
 
 /* ========================= species override table ======================= */
-const ROMANIA_ABSENT = ["genet", "ibex", "porcupine", "reindeer", "wolverine"];
+const ROMANIA_ABSENT = ["fallow deer", "genet", "ibex", "moose", "mouflon", "muskrat",
+  "nutria", "porcupine", "raccoon", "raccoon dog", "reindeer", "wolverine"];
 
 function buildSpeciesTable() {
   const tb = $("sptbody");
@@ -914,6 +932,15 @@ async function generate() {
     await new Promise((r) => requestAnimationFrame(r));
   }
 
+  /* oldest first; wrong-clock (1970) dates sort first by that rule, undated last */
+  {
+    const nk = out.length / 2, ord = [];
+    for (let k = 0; k < nk; k++) ord.push(k);
+    ord.sort((a, b) => S.tMin[out[a * 2]] - S.tMin[out[b * 2]]);
+    const sorted = new Array(out.length);
+    ord.forEach((k, j) => { sorted[j * 2] = out[k * 2]; sorted[j * 2 + 1] = out[k * 2 + 1]; });
+    for (let j = 0; j < out.length; j++) out[j] = sorted[j];
+  }
   const events = out.length / 2;
   S.results = Object.assign({ pairs: out, events, dropped, F }, A);
   setBar("genbar", 100);
@@ -922,6 +949,7 @@ async function generate() {
   buildDerived();
   renderAll();
   $("download").disabled = events === 0;
+  $("download-img").disabled = events === 0 || !S.src;
   $("dl-summary").disabled = events === 0;
   $("actionstatus").textContent = events
     ? "Generated. Downloads are ready."
@@ -935,6 +963,7 @@ function invalidate() {
   if (!S.loaded) return;
   S.results = null;
   $("download").disabled = true;
+  $("download-img").disabled = true;
   $("dl-summary").disabled = true;
   $("genprog").hidden = true;
   $("actionstatus").textContent = "Filters changed — press Generate to update.";
@@ -1066,6 +1095,7 @@ function renderScalars() {
     [fmt(R.nonEmpty), "Animal &amp; human detections", false],
     [String(stn), "Camera stations", true],
     [String(nAnimalTypes), "Animal types", false],
+    [fmt(R.dropped), "Events filtered out", true],
   ];
   $("kpis").innerHTML = KPI.map((k) =>
     '<div class="kpi' + (k[2] ? " alt" : "") + '"><div class="v">' + k[0] +
@@ -1463,6 +1493,7 @@ function renderTable() {
   for (let k = 0; k < Math.min(R.events, LIMIT); k++) {
     const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
     const tr = document.createElement("tr");
+    tr.className = "ev"; tr.dataset.i = i;
     const when = isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 16).replace("T", " ") : "—";
     /* Show the species the model actually chose; below the threshold it is
        shown in red rather than replaced by "undefined". */
@@ -1480,9 +1511,11 @@ function renderTable() {
     frag.appendChild(tr);
   }
   tb.appendChild(frag);
-  $("tablenote").textContent = R.events > LIMIT
-    ? "Showing the first " + LIMIT + " of " + fmt(R.events) + " events. The CSV holds them all."
-    : fmt(R.events) + " events.";
+  $("tablenote").textContent = (R.events > LIMIT
+    ? "Showing the first " + LIMIT + " of " + fmt(R.events) + " events, oldest first. The CSV holds them all."
+    : fmt(R.events) + " events, oldest first.");
+  probePhotos();
+  photoHint();
   const thr = (+$("thrNum").value).toFixed(2);
   $("legend").innerHTML =
     '<span class="pill animal">species</span> scored at or above ' + thr + " · " +
@@ -1490,6 +1523,61 @@ function renderTable() {
     ' (exported with prediction "undefined", the species kept in top1) · ' +
     '<span class="pill other">empty / human / vehicle</span>';
 }
+
+/* ------------------------- photo previews ------------------------------ */
+/* The image files live on the archive drive, which this page usually cannot
+   reach (a Desktop copy over file://, a phone over http). Probe once with a
+   real image; only when that loads do rows offer previews at all, so nothing
+   ever renders as a broken strip. */
+var PHOTOS_STATE = "unknown";   /* unknown | ok | no */
+function eventDir(i) { const f = S.firstFile[i]; return f.slice(0, f.lastIndexOf("/")); }
+function imgUrl(path) {
+  const enc = encodeURI(path);
+  return location.protocol === "file:" ? "file://" + enc : enc;
+}
+function probePhotos() {
+  if (PHOTOS_STATE !== "unknown" || !S.results || !S.results.events) return;
+  const i = S.results.pairs[0];
+  const files = S.files[i] || [];
+  if (!files.length) { PHOTOS_STATE = "no"; photoHint(); return; }
+  const im = new Image();
+  im.onload = () => { PHOTOS_STATE = "ok"; photoHint(); };
+  im.onerror = () => { PHOTOS_STATE = "no"; photoHint(); };
+  im.src = imgUrl(eventDir(i) + "/" + files[0]);
+}
+function photoHint() {
+  $("photonote").textContent = PHOTOS_STATE === "ok"
+    ? "Click a row to preview its photographs."
+    : (PHOTOS_STATE === "no"
+      ? "Photograph previews are off: the image files are not reachable from where this page is opened."
+      : "");
+  document.querySelectorAll("#resbody tr.ev").forEach((tr) =>
+    tr.classList.toggle("click", PHOTOS_STATE === "ok"));
+}
+function photoRow(i) {
+  const files = S.files[i] || [], dir = eventDir(i);
+  const tr = document.createElement("tr");
+  tr.className = "photorow";
+  const cap = S.nImg[i] > files.length
+    ? "first " + files.length + " of " + S.nImg[i] + " photographs"
+    : files.length + " photograph" + (files.length === 1 ? "" : "s");
+  tr.innerHTML = '<td colspan="8"><div class="pstrip">' +
+    files.map((f) => {
+      const u = imgUrl(dir + "/" + f);
+      return '<a href="' + u + '" target="_blank" rel="noopener">' +
+        '<img loading="lazy" alt="" src="' + u + '" onerror="this.parentNode.remove()"></a>';
+    }).join("") +
+    '</div><div class="hint" style="margin-top:6px">' + cap + " · " + esc(dir) + "</div></td>";
+  return tr;
+}
+$("resbody").addEventListener("click", (e) => {
+  if (PHOTOS_STATE !== "ok") return;
+  const tr = e.target.closest("tr.ev");
+  if (!tr) return;
+  const open = tr.nextElementSibling && tr.nextElementSibling.classList.contains("photorow");
+  document.querySelectorAll("#resbody tr.photorow").forEach((x) => x.remove());
+  if (!open) tr.after(photoRow(+tr.dataset.i));
+});
 
 /* =============================== downloads ============================== */
 function saveBlob(blob, name) {
@@ -1524,8 +1612,92 @@ function downloadCsv() {
   }
   if (buf) parts.push(buf);
   const stamp = new Date().toISOString().slice(0, 10);
-  saveBlob(new Blob(parts, { type: "text/csv;charset=utf-8" }), "deepfaune_filtered_" + stamp + ".csv");
+  saveBlob(new Blob(parts, { type: "text/csv;charset=utf-8" }), "deepfaune_filtered_events_" + stamp + ".csv");
 }
+
+/* Per-image export: re-reads the source CSV and writes only the rows whose
+   event survives the current filters, with exactly the master's columns. The
+   sequence-level verdict columns are refreshed to the re-derived result so
+   the file reads as if the archive had been classified with these settings;
+   image-level columns pass through untouched. */
+async function downloadImagesCsv() {
+  const R = S.results;
+  if (!R || !S.src) return;
+  const kept = new Array(S.n);
+  for (let k = 0; k < R.events; k++) kept[R.pairs[k * 2]] = R.pairs[k * 2 + 1];
+  let reader, total = 0;
+  try {
+    if (S.src.file) { reader = S.src.file.stream().getReader(); total = S.src.file.size; }
+    else {
+      const resp = await fetch(S.src.url);
+      if (!resp.ok || !resp.body) throw new Error("fetch failed");
+      reader = resp.body.getReader(); total = +(resp.headers.get("content-length") || 0);
+    }
+  } catch (e) {
+    $("actionstatus").textContent = "Could not re-read the source CSV for the per-image export.";
+    return;
+  }
+  $("genprog").hidden = false;
+  setBar("genbar", 0);
+  $("genmsg").textContent = "Writing images CSV…"; $("geneta").textContent = "";
+  const decoder = new TextDecoder("utf-8");
+  const parts = [];
+  let buf = "", remainder = "", read = 0, first = true;
+  let header = null, col = {}, seqCol = -1, wrote = 0;
+  const t0 = performance.now();
+  const handleLine = (line) => {
+    if (first) {
+      first = false;
+      header = splitCsv(line).map((h) => h.trim());
+      header.forEach((h, j) => { col[h] = j; });
+      seqCol = col.sequence_id != null ? col.sequence_id : -1;
+      buf += line + "\n";
+      return;
+    }
+    const p2 = splitCsv(line);
+    if (p2.length < header.length - 2) return;
+    const fn = p2[col.filename] || "";
+    const key = seqCol >= 0 && p2[seqCol] ? p2[seqCol]
+      : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p2[col.seqnum] || "");
+    const i = S.map.get(key);
+    const r = i !== undefined ? kept[i] : undefined;
+    if (!r) return;
+    if (r.top1 && col.prediction_seq != null) {
+      p2[col.prediction_seq] = r.label;
+      if (col.top1_seq != null) p2[col.top1_seq] = r.top1;
+      if (col.score_seq != null) p2[col.score_seq] = r.score.toFixed(4);
+      if (col.above_threshold != null) p2[col.above_threshold] = r.kind === "animal" ? "yes" : "no";
+      buf += p2.map(csvCell).join(",") + "\n";
+    } else {
+      buf += line + "\n";   /* empty / human / vehicle rows pass through untouched */
+    }
+    wrote++;
+    if (buf.length > 1 << 20) { parts.push(buf); buf = ""; }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    read += value.byteLength;
+    const chunk = remainder + decoder.decode(value, { stream: true });
+    const lines = chunk.split("\n");
+    remainder = lines.pop();
+    for (const raw of lines) {
+      const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+      if (line) handleLine(line);
+    }
+    if (total) setBar("genbar", (read / total) * 100);
+    $("genmsg").textContent = "Writing images CSV… " + fmt(wrote) + " rows";
+    await new Promise((res) => setTimeout(res, 0));
+  }
+  if (remainder.trim()) handleLine(remainder.endsWith("\r") ? remainder.slice(0, -1) : remainder);
+  if (buf) parts.push(buf);
+  setBar("genbar", 100);
+  $("genmsg").textContent = fmt(wrote) + " image rows";
+  $("geneta").textContent = "in " + humanTime((performance.now() - t0) / 1000);
+  const stamp = new Date().toISOString().slice(0, 10);
+  saveBlob(new Blob(parts, { type: "text/csv;charset=utf-8" }), "deepfaune_filtered_images_" + stamp + ".csv");
+}
+
 function downloadSummary() {
   const R = S.results;
   if (!R) return;
@@ -1667,6 +1839,10 @@ $("generate").addEventListener("click", () => {
   generate().finally(() => { $("generate").disabled = false; });
 });
 $("download").addEventListener("click", downloadCsv);
+$("download-img").addEventListener("click", () => {
+  $("download-img").disabled = true;
+  downloadImagesCsv().finally(() => { $("download-img").disabled = !S.results || !S.results.events; });
+});
 $("dl-summary").addEventListener("click", downloadSummary);
 $("scopeTog").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b || b.dataset.v === SCOPE) return;

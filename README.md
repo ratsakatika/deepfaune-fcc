@@ -250,13 +250,21 @@ or per-species confidence threshold (typed or by slider), require a minimum
 sequence length in seconds, untick species that cannot occur so their
 detections fall to the next-best species, and switch scope between the
 official survey (Camera Trap Monitoring/Collections) and all images. The
-events table shows the top three species with scores to three decimal places,
-naming the top choice even when it scored below the threshold (shown in red
-rather than hidden behind "undefined"). Events whose camera clock was wrong
+events table lists events oldest first, shows the top three species with
+scores to three decimal places (naming the top choice even when it scored
+below the threshold, shown in red rather than hidden behind "undefined"),
+and, when the image files are reachable from where the page is opened,
+clicking a row previews its photographs (a silent probe decides this, so
+nothing ever renders broken). "Keep below-threshold events" sits with the
+threshold control, since those are animal detections rather than non-animal
+categories. Events whose camera clock was wrong
 (1970 dates) are counted in station and map totals but left off the time
 panels, exactly as in the original dashboard. The ring saves as PNG or SVG,
-the seasonal chart and both bar panels save as PNG, the species summary saves
-as a CSV, and the filtered events export as a CSV with `top2`/`top3` columns.
+the seasonal chart and both bar panels save as PNG, and the species summary
+saves as a CSV. Two filtered exports are offered: an events CSV (one row per
+event, with `top2`/`top3` columns) and an images CSV that re-reads the master
+and keeps exactly its columns, writing only the rows of surviving events with
+the sequence-level verdict columns refreshed to the re-derived result.
 The seasonal chart and the map load their libraries (Plotly, Leaflet) from
 public CDNs, so those two panels need an internet connection the first time;
 everything else works offline. Events are grouped by `sequence_id`.

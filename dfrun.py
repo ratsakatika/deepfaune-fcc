@@ -43,7 +43,7 @@ TOOL_NAME = "dfrun"
 # for medium features, first for complete overhauls. See CLAUDE.md
 # ("Versioning") - the self-updater shows this to users, so a stale number
 # makes different code report the same version.
-TOOL_VERSION = "1.6.0"
+TOOL_VERSION = "1.7.0"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -94,7 +94,7 @@ DESKTOP_WILDLIFE = "deepfaune_wildlife.csv"
 DESKTOP_SUMMARY = "deepfaune_summary.csv"
 DESKTOP_DASHBOARD = "deepfaune_dashboard.html"
 DESKTOP_GUIDE = "How_to_use_dfrun.html"
-DESKTOP_WORKBENCH = "filter_master_results.html"
+DESKTOP_WORKBENCH = "dashboard_and_filter.html"
 
 # The dashboard builder (in the software dir) and the field protocol it reads.
 DASHBOARD_BUILDER = "build_dashboard.py"
@@ -1610,7 +1610,7 @@ def stage_configure(args, out_dir, argv=None, source=None):
                 "  NOTE: that run excluded species during classification "
                 f"({', '.join(params['exclude_classes'])}). Continuing with the "
                 "same list so its results stay consistent. New runs no longer "
-                "do this: exclude species in filter_master_results.html instead, "
+                "do this: exclude species in dashboard_and_filter.html instead, "
                 "where the choice can be undone."
             )
         if explicit:
@@ -2087,8 +2087,8 @@ def finish_outputs(out_dir, software_dir, force_merge=False, canonical_root=None
     print("Open the wildlife and summary files in Excel, the master in R, and the dashboard in a browser.")
     workbench = os.path.join(DESKTOP_DIR, DESKTOP_WORKBENCH)
     if os.path.exists(workbench):
-        print(f"To filter by your own thresholds and species, open {DESKTOP_WORKBENCH} "
-              f"and load {DESKTOP_MASTER}.")
+        print(f"To explore and filter by your own thresholds and species, open "
+              f"{DESKTOP_WORKBENCH} and load {DESKTOP_MASTER}.")
 
 
 if __name__ == "__main__":

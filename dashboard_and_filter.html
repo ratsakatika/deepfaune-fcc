@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Detection Filter Workbench</title>
+<title>Detection Dashboard &amp; Filter</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -245,6 +245,14 @@ td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; fon
 .charts { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
 .chart h3 { margin: 0 0 2px; font-size: 14px; font-weight: 600; }
 .chart .cap { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-3); }
+.charthead { display: flex; align-items: flex-start; gap: 10px; }
+.charthead > div:first-child { flex: 1 1 auto; min-width: 0; }
+button.mini {
+  padding: 3px 9px; font-size: 12px; border-radius: 6px;
+  font-family: "IBM Plex Mono", monospace;
+}
+.savebtns { display: flex; gap: 6px; flex: none; }
+.exports { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart text { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--ink-2); }
 .chart .val { fill: var(--ink); font-weight: 500; }
@@ -288,10 +296,10 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
   <header class="masthead">
     <div>
       <div class="eyebrow">DeepFaune &middot; camera-trap archive</div>
-      <h1>Detection Filter Workbench</h1>
-      <p>Rebuild species predictions from the raw model scores in your master CSV.
-         Set thresholds, drop species that cannot occur, require a minimum burst
-         length, then export the events you want.</p>
+      <h1>Detection Dashboard &amp; Filter</h1>
+      <p>Explore, filter and export the archive from the raw model scores in the
+         master CSV: set thresholds, drop species that cannot occur, require a
+         minimum sequence length, then save the events, summaries and figures.</p>
     </div>
     <div class="spacer"></div>
     <button id="theme" title="Switch light and dark">Theme</button>
@@ -302,10 +310,11 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
     <header><span class="step">1</span><h2>Load the master CSV</h2></header>
     <div class="body">
       <div class="drop" id="drop">
-        <button id="pick" class="primary">Choose master CSV</button>
+        <button id="pick" class="primary">Choose a different CSV</button>
         <input type="file" id="file" accept=".csv,text/csv" hidden>
-        <p class="hint">Or drag <span class="mono">deepfaune_master.csv</span> here.
-           Nothing is uploaded &mdash; the file is read in your browser.</p>
+        <p class="hint" id="autonote"><span class="mono">deepfaune_master.csv</span> loads
+           automatically when this page is served from the same folder; otherwise choose
+           or drag a file here. Nothing is uploaded &mdash; it is read in your browser.</p>
         <div class="filemeta" id="filemeta" hidden></div>
       </div>
       <div class="progress" id="loadprog" hidden>
@@ -401,16 +410,42 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
     <div class="body">
       <div class="tiles" id="tiles"></div>
 
-      <div class="charts" style="margin-top:22px">
+      <div class="exports">
+        <button class="mini" id="dl-summary">Save species summary (CSV)</button>
+      </div>
+
+      <div class="charts" style="margin-top:18px">
         <figure class="chart" style="margin:0">
-          <h3>Events by species</h3>
-          <p class="cap" id="cap-species">Top species after filtering.</p>
-          <div id="chart-species"></div>
+          <div class="charthead">
+            <div><h3>Events by species</h3>
+                 <p class="cap" id="cap-species">Top species after filtering.</p></div>
+            <div class="savebtns"><button class="mini" data-save="chart-species" data-fmt="png">PNG</button><button class="mini" data-save="chart-species" data-fmt="svg">SVG</button></div>
+          </div>
+          <div id="chart-species" data-title="Events by species"></div>
         </figure>
         <figure class="chart" style="margin:0">
-          <h3>Events by month</h3>
-          <p class="cap" id="cap-month">Detection events per calendar month.</p>
-          <div id="chart-month"></div>
+          <div class="charthead">
+            <div><h3>Events by month</h3>
+                 <p class="cap" id="cap-month">Detection events per calendar month.</p></div>
+            <div class="savebtns"><button class="mini" data-save="chart-month" data-fmt="png">PNG</button><button class="mini" data-save="chart-month" data-fmt="svg">SVG</button></div>
+          </div>
+          <div id="chart-month" data-title="Events by month"></div>
+        </figure>
+        <figure class="chart" style="margin:0">
+          <div class="charthead">
+            <div><h3>Events by hour of day</h3>
+                 <p class="cap" id="cap-hour">Diel activity across the filtered events.</p></div>
+            <div class="savebtns"><button class="mini" data-save="chart-hour" data-fmt="png">PNG</button><button class="mini" data-save="chart-hour" data-fmt="svg">SVG</button></div>
+          </div>
+          <div id="chart-hour" data-title="Events by hour of day"></div>
+        </figure>
+        <figure class="chart" style="margin:0">
+          <div class="charthead">
+            <div><h3>Busiest stations</h3>
+                 <p class="cap" id="cap-stations">Events per camera station.</p></div>
+            <div class="savebtns"><button class="mini" data-save="chart-stations" data-fmt="png">PNG</button><button class="mini" data-save="chart-stations" data-fmt="svg">SVG</button></div>
+          </div>
+          <div id="chart-stations" data-title="Busiest stations"></div>
         </figure>
       </div>
 
@@ -419,8 +454,9 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
       <p class="legend" id="legend"></p>
       <div class="tablewrap">
         <table><thead><tr>
-          <th>Species</th><th class="num">Score</th><th class="num">Images</th>
-          <th class="num">Length</th><th>Station</th><th>Date</th><th class="num">Runner-up</th>
+          <th>Top 1</th><th class="num">Score</th><th class="num">Top 2</th>
+          <th class="num">Top 3</th><th class="num">Images</th>
+          <th class="num">Length</th><th>Station</th><th>Date</th>
         </tr></thead><tbody id="resbody"></tbody></table>
       </div>
     </div>
@@ -496,6 +532,13 @@ function parseExif(s) {
 function seqSeconds(i) {
   return isFinite(S.tMin[i]) && isFinite(S.tMax[i]) ? (S.tMax[i] - S.tMin[i]) / 1000 : 0;
 }
+/* Cameras with a dead clock stamp 1970 (or another junk year); those dates
+   are wrong, not missing, so time charts skip them rather than plot them. */
+function plausibleDate(t) {
+  if (!isFinite(t)) return false;
+  const y = new Date(t).getFullYear();
+  return y >= 2000 && y <= new Date().getFullYear() + 1;
+}
 function stationOf(path) {
   const parts = path.split("/").filter(Boolean);
   return parts.length >= 3 ? parts.slice(-3, -1).join("/") : (parts[0] || "(unknown)");
@@ -533,8 +576,25 @@ function grow(need) {
 
 /* ============================ loading the CSV =========================== */
 async function loadFile(file) {
+  await loadFrom(file.stream().getReader(), file.size, file.name);
+}
+
+/* When the page is served over HTTP from the out-dir (python3 -m http.server),
+   the master file sits beside it - load it without asking. On file:// or when
+   the fetch fails, fall back silently to the picker. */
+async function tryAutoLoad() {
+  if (location.protocol !== "http:" && location.protocol !== "https:") return;
+  try {
+    const resp = await fetch("deepfaune_master.csv");
+    if (!resp.ok || !resp.body) return;
+    const size = +(resp.headers.get("content-length") || 0);
+    await loadFrom(resp.body.getReader(), size, "deepfaune_master.csv (auto-loaded)");
+  } catch (e) { /* no master file next to the page - the picker still works */ }
+}
+
+async function loadFrom(reader, totalBytes, label) {
   $("filemeta").hidden = false;
-  $("filemeta").textContent = file.name + " · " + humanBytes(file.size);
+  $("filemeta").textContent = label + (totalBytes ? " · " + humanBytes(totalBytes) : "");
   $("loadnote").hidden = true;
   $("loadprog").hidden = false;
   setBar("loadbar", 0);
@@ -543,7 +603,6 @@ async function loadFile(file) {
     nImg: null, nAnimal: null, nHuman: null, nVehicle: null, nEmpty: null,
     tMin: null, tMax: null, logs: null, map: new Map(), rows: 0, results: null });
 
-  const reader = file.stream().getReader();
   const decoder = new TextDecoder("utf-8");
   let remainder = "", read = 0, header = null, col = {}, scoreIdx = [], seqCol = -1;
   const t0 = performance.now();
@@ -619,12 +678,13 @@ async function loadFile(file) {
     const now = performance.now();
     if (now - lastPaint > 90) {
       lastPaint = now;
-      const frac = read / file.size;
+      const frac = totalBytes ? read / totalBytes : 0;
       setBar("loadbar", frac * 100);
       const rate = read / ((now - t0) / 1000);
       $("loadmsg").textContent = fmt(S.rows) + " images · " + fmt(S.n) + " events · " +
-        humanBytes(read) + " of " + humanBytes(file.size);
-      $("loadeta").textContent = frac > 0.01 ? "about " + humanTime((file.size - read) / rate) + " left" : "";
+        humanBytes(read) + (totalBytes ? " of " + humanBytes(totalBytes) : "");
+      $("loadeta").textContent = frac > 0.01 && frac < 1
+        ? "about " + humanTime((totalBytes - read) / rate) + " left" : "";
       await new Promise((r) => setTimeout(r, 0));
     }
   }
@@ -718,12 +778,13 @@ function classify(i, F) {
   }
   const base = i * S.K, n = S.nAnimal[i];
   const factor = T_IMAGE / (n > 1 ? T_SEQ : T_IMAGE);
-  let best = -1, bestA = -Infinity, second = -1, secondA = -Infinity;
+  let best = -1, bestA = -Infinity, second = -1, secondA = -Infinity, third = -1, thirdA = -Infinity;
   for (let j = 0; j < S.K; j++) {
     if (!F.on[j]) continue;
     const a = (S.logs[base + j] / n) * factor;
-    if (a > bestA) { second = best; secondA = bestA; best = j; bestA = a; }
-    else if (a > secondA) { second = j; secondA = a; }
+    if (a > bestA) { third = second; thirdA = secondA; second = best; secondA = bestA; best = j; bestA = a; }
+    else if (a > secondA) { third = second; thirdA = secondA; second = j; secondA = a; }
+    else if (a > thirdA) { third = j; thirdA = a; }
   }
   if (best < 0) return { label: "undefined", score: 0, kind: "undefined" };
   let sum = 0;
@@ -732,13 +793,15 @@ function classify(i, F) {
     sum += Math.exp(((S.logs[base + j] / n) * factor) - bestA);
   }
   const score = 1 / sum;
-  const runner = second >= 0 ? S.classes[second] : "";
-  const runnerScore = second >= 0 ? Math.exp(secondA - bestA) * score : 0;
   const pass = score >= F.thr[best];
   return {
     label: pass ? S.classes[best] : "undefined",
     top1: S.classes[best], score, kind: pass ? "animal" : "undefined",
-    cls: best, runner, runnerScore,
+    cls: best,
+    second: second >= 0 ? S.classes[second] : "",
+    secondScore: second >= 0 ? Math.exp(secondA - bestA) * score : 0,
+    third: third >= 0 ? S.classes[third] : "",
+    thirdScore: third >= 0 ? Math.exp(thirdA - bestA) * score : 0,
   };
 }
 
@@ -749,7 +812,8 @@ async function generate() {
   const t0 = performance.now();
   const out = [];
   const bySpecies = new Map(), byMonth = new Map(), byStation = new Map();
-  let images = 0, dropped = 0;
+  const imgBySpecies = new Map(), byHour = new Int32Array(24);
+  let images = 0, dropped = 0, badDates = 0;
 
   const CHUNK = 20000;
   for (let start = 0; start < S.n; start += CHUNK) {
@@ -767,12 +831,14 @@ async function generate() {
       out.push(r);
       images += S.nImg[i];
       bySpecies.set(r.label, (bySpecies.get(r.label) || 0) + 1);
+      imgBySpecies.set(r.label, (imgBySpecies.get(r.label) || 0) + S.nImg[i]);
       byStation.set(S.station[i], (byStation.get(S.station[i]) || 0) + 1);
-      if (isFinite(S.tMin[i])) {
+      if (plausibleDate(S.tMin[i])) {
         const d = new Date(S.tMin[i]);
         const k = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
         byMonth.set(k, (byMonth.get(k) || 0) + 1);
-      }
+        byHour[d.getHours()]++;
+      } else badDates++;
     }
     const frac = end / S.n;
     setBar("genbar", frac * 100);
@@ -783,7 +849,8 @@ async function generate() {
   }
 
   const events = out.length / 2;
-  S.results = { pairs: out, events, images, dropped, bySpecies, byMonth, byStation, F };
+  S.results = { pairs: out, events, images, dropped, badDates,
+    bySpecies, imgBySpecies, byMonth, byHour, byStation, F };
   setBar("genbar", 100);
   $("genmsg").textContent = fmt(events) + " events kept";
   $("geneta").textContent = "in " + humanTime((performance.now() - t0) / 1000);
@@ -828,9 +895,19 @@ function renderResults() {
 
   const months = [...R.byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   colChart("chart-month", months.map(([k, v]) => ({ label: k, value: v })));
-  $("cap-month").textContent = months.length
+  $("cap-month").textContent = (months.length
     ? months.length + " months, " + months[0][0] + " to " + months[months.length - 1][0] + "."
-    : "No dated events.";
+    : "No plausibly dated events.") +
+    (R.badDates ? " " + fmt(R.badDates) + (R.badDates === 1 ? " event" : " events") + " with an implausible or missing date (for example 1970, a dead camera clock) " + (R.badDates === 1 ? "is" : "are") + " not plotted." : "");
+
+  colChart("chart-hour", [...R.byHour].map((v, h) => ({ label: String(h).padStart(2, "0"), value: v })));
+  $("cap-hour").textContent = "Start hour of each plausibly dated event, camera local time.";
+
+  const stations = [...R.byStation.entries()].sort((a, b) => b[1] - a[1]);
+  barChart("chart-stations", stations.slice(0, 10).map(([k, v]) => ({ label: k, value: v })), "events");
+  $("cap-stations").textContent = stations.length > 10
+    ? "Top 10 of " + stations.length + " stations, by number of events."
+    : "All " + stations.length + " stations, by number of events.";
 
   const LIMIT = 300;
   const tb = $("resbody");
@@ -848,11 +925,12 @@ function renderResults() {
     tr.innerHTML =
       '<td><span class="pill ' + cls + '">' + esc(shown) + "</span></td>" +
       '<td class="num">' + r.score.toFixed(3) + "</td>" +
+      '<td class="num muted">' + (r.second ? esc(r.second) + " " + r.secondScore.toFixed(3) : "—") + "</td>" +
+      '<td class="num muted">' + (r.third ? esc(r.third) + " " + r.thirdScore.toFixed(3) : "—") + "</td>" +
       '<td class="num">' + S.nImg[i] + "</td>" +
       '<td class="num">' + fmtSecs(seqSeconds(i)) + "</td>" +
       "<td>" + esc(S.station[i]) + "</td>" +
-      '<td class="num">' + when + "</td>" +
-      '<td class="num muted">' + (r.runner ? esc(r.runner) + " " + r.runnerScore.toFixed(2) : "—") + "</td>";
+      '<td class="num">' + when + "</td>";
     frag.appendChild(tr);
   }
   tb.appendChild(frag);
@@ -896,12 +974,14 @@ function barChart(mountId, data, unit) {
   const H = data.length * (rowH + gap) + 8;
   const max = Math.max(...data.map((d) => d.value));
   const scale = (v) => Math.max(2, (v / max) * (W - padL - padR));
-  let s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Events by species">';
+  const title = mount.dataset.title || "Chart";
+  const shortLabel = (l) => (l.length > 17 ? "\u2026" + l.slice(-16) : l);
+  let s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(title) + '">';
   data.forEach((d, i) => {
     const y = i * (rowH + gap);
     const w = scale(d.value);
     s += '<g class="row">' +
-      '<text x="' + (padL - 10) + '" y="' + (y + rowH * 0.68) + '" text-anchor="end">' + esc(d.label) + "</text>" +
+      '<text x="' + (padL - 10) + '" y="' + (y + rowH * 0.68) + '" text-anchor="end">' + esc(shortLabel(d.label)) + "</text>" +
       '<rect class="mark" x="' + padL + '" y="' + y + '" width="' + w + '" height="' + rowH + '" rx="4"></rect>' +
       '<text class="val" x="' + (padL + w + 8) + '" y="' + (y + rowH * 0.68) + '">' + fmt(d.value) + "</text>" +
       '<rect class="hit" x="0" y="' + y + '" width="' + W + '" height="' + rowH + '"' +
@@ -915,12 +995,15 @@ function barChart(mountId, data, unit) {
 
 function colChart(mountId, data) {
   const mount = $(mountId);
-  if (!data.length) { mount.innerHTML = '<p class="hint">Nothing to show.</p>'; return; }
+  if (!data.length || !data.some((d) => d.value > 0)) {
+    mount.innerHTML = '<p class="hint">Nothing to show.</p>'; return;
+  }
   const W = 520, H = 220, padB = 34, padL = 44, padT = 10;
   const max = Math.max(...data.map((d) => d.value));
   const bw = (W - padL - 8) / data.length;
   const y = (v) => padT + (1 - v / max) * (H - padT - padB);
-  let s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Events by month">';
+  const title = mount.dataset.title || "Chart";
+  let s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(title) + '">';
   for (let g = 0; g <= 3; g++) {
     const v = (max / 3) * g, yy = y(v);
     s += '<line class="gridline" x1="' + padL + '" x2="' + W + '" y1="' + yy + '" y2="' + yy + '"></line>' +
@@ -959,7 +1042,8 @@ function wireHits(mount, unit) {
 function downloadCsv() {
   const R = S.results;
   if (!R) return;
-  const head = ["sequence_id", "prediction", "score", "top1", "runner_up", "runner_up_score",
+  const head = ["sequence_id", "prediction", "score", "top1",
+    "top2", "top2_score", "top3", "top3_score",
     "sequence_seconds", "n_images", "n_animal_images", "n_human_images", "n_vehicle_images",
     "station", "date_start", "date_end", "example_image"];
   const parts = [head.join(",") + "\n"];
@@ -968,7 +1052,8 @@ function downloadCsv() {
     const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
     buf += [
       csvCell(S.id[i]), csvCell(r.label), r.score.toFixed(4), csvCell(r.top1 || r.label),
-      csvCell(r.runner || ""), r.runner ? r.runnerScore.toFixed(4) : "",
+      csvCell(r.second || ""), r.second ? r.secondScore.toFixed(4) : "",
+      csvCell(r.third || ""), r.third ? r.thirdScore.toFixed(4) : "",
       Math.round(seqSeconds(i)), S.nImg[i], S.nAnimal[i], S.nHuman[i], S.nVehicle[i],
       csvCell(S.station[i]),
       isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 19).replace("T", " ") : "",
@@ -978,13 +1063,88 @@ function downloadCsv() {
     if (buf.length > 1 << 20) { parts.push(buf); buf = ""; }
   }
   if (buf) parts.push(buf);
-  const url = URL.createObjectURL(new Blob(parts, { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
   const stamp = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = "deepfaune_filtered_" + stamp + ".csv";
+  saveBlob(new Blob(parts, { type: "text/csv;charset=utf-8" }), "deepfaune_filtered_" + stamp + ".csv");
+}
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function downloadSummary() {
+  const R = S.results;
+  if (!R) return;
+  const rows = [...R.bySpecies.entries()].sort((a, b) => b[1] - a[1]);
+  let csv = "species,events,images\n";
+  rows.forEach(([k, v]) => {
+    csv += csvCell(k) + "," + v + "," + (R.imgBySpecies.get(k) || 0) + "\n";
+  });
+  const stamp = new Date().toISOString().slice(0, 10);
+  saveBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "deepfaune_species_summary_" + stamp + ".csv");
+}
+
+/* ---------------------------- figure saving ----------------------------- */
+/* The on-page charts are styled by CSS variables, which an exported SVG or
+   PNG would lose; resolve the current theme's colours into an inline style
+   and paint a background so the file stands alone. */
+function chartStyles() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name) => cs.getPropertyValue(name).trim();
+  return {
+    bg: v("--surface") || "#ffffff",
+    css: "svg{font-family:'IBM Plex Sans','Helvetica Neue',Arial,sans-serif}" +
+      "text{font-size:11px;fill:" + v("--ink-2") + "}" +
+      "text.val{fill:" + v("--ink") + ";font-weight:600}" +
+      ".gridline{stroke:" + v("--line-strong") + ";stroke-dasharray:2 3}" +
+      "rect.mark{fill:" + v("--data") + "}" +
+      "rect.hit{fill:transparent}",
+  };
+}
+function saveFigure(mountId, kind) {
+  const mount = $(mountId);
+  const svg = mount ? mount.querySelector("svg") : null;
+  if (!svg) return;
+  const NS = "http://www.w3.org/2000/svg";
+  const vb = svg.viewBox.baseVal;
+  const { bg, css } = chartStyles();
+  const clone = svg.cloneNode(true);
+  clone.setAttribute("xmlns", NS);
+  clone.setAttribute("width", vb.width);
+  clone.setAttribute("height", vb.height);
+  const style = document.createElementNS(NS, "style");
+  style.textContent = css;
+  const back = document.createElementNS(NS, "rect");
+  back.setAttribute("x", 0); back.setAttribute("y", 0);
+  back.setAttribute("width", vb.width); back.setAttribute("height", vb.height);
+  back.setAttribute("fill", bg);
+  clone.insertBefore(back, clone.firstChild);
+  clone.insertBefore(style, clone.firstChild);
+  const xml = new XMLSerializer().serializeToString(clone);
+  const base = (mount.dataset.title || mountId).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (kind === "svg") {
+    saveBlob(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }), base + ".svg");
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }));
+  const img = new Image();
+  img.onload = () => {
+    const SCALE = 2;   // crisp on high-density screens
+    const canvas = document.createElement("canvas");
+    canvas.width = vb.width * SCALE;
+    canvas.height = vb.height * SCALE;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob((b) => { if (b) saveBlob(b, base + ".png"); }, "image/png");
+  };
+  img.onerror = () => URL.revokeObjectURL(url);
+  img.src = url;
 }
 
 /* ================================ wiring ================================ */
@@ -1025,11 +1185,15 @@ $("sp-none").addEventListener("click", () => setAllSpecies(false));
 $("sp-romania").addEventListener("click", () => setAllSpecies(true, ROMANIA_ABSENT));
 $("generate").addEventListener("click", () => { $("generate").disabled = true; generate().finally(() => { $("generate").disabled = false; }); });
 $("download").addEventListener("click", downloadCsv);
+$("dl-summary").addEventListener("click", downloadSummary);
+document.querySelectorAll("button[data-save]").forEach((b) =>
+  b.addEventListener("click", () => saveFigure(b.dataset.save, b.dataset.fmt)));
 $("theme").addEventListener("click", () => {
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
   const cur = document.documentElement.getAttribute("data-theme") || (dark ? "dark" : "light");
   document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
 });
+tryAutoLoad();
 </script>
 </body>
 </html>

@@ -1668,9 +1668,10 @@ def build_arg_parser():
     parser.add_argument(
         "--exclude-classes", default="",
         help="Comma-separated English animal class names the classifier must "
-             "never predict (impossible species for the survey area), e.g. "
-             "'ibex,marmot,genet'. Raw per-class scores are still recorded "
-             "for excluded classes; only the prediction is constrained.",
+             "never predict. Retained so a run started with exclusions can be "
+             "resumed consistently; do not use it for new runs. Excluding here "
+             "is permanent, while the raw score_* columns let the same choice "
+             "be made (and undone) later in filter_master_results.html.",
     )
     parser.add_argument(
         "--min-avail-gib", type=float, default=0,

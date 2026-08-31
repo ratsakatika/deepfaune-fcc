@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Detection Filter Workbench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* ---------- tokens: light is the base, dark redefines only values ---------- */
+:root {
+  color-scheme: light;
+  --ground:      #f3f5f3;
+  --surface:     #ffffff;
+  --surface-2:   #ecefec;
+  --line:        #dde3df;
+  --line-strong: #c3ccc6;
+  --ink:         #12171a;
+  --ink-2:       #4d5854;
+  --ink-3:       #6f7a76;
+  --accent:      #9c5a0d;
+  --accent-ink:  #ffffff;
+  --accent-soft: #f6ecdf;
+  --data:        #2a78d6;
+  --data-soft:   #cde2fb;
+  --good:        #0ca30c;
+  --warn:        #fab219;
+  --crit:        #d03b3b;
+  --shadow:      0 1px 2px rgba(18, 23, 26, .06), 0 8px 24px -16px rgba(18, 23, 26, .25);
+  --radius:      10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground:      #121614;
+    --surface:     #1a1f1d;
+    --surface-2:   #232926;
+    --line:        #2b322e;
+    --line-strong: #3c443f;
+    --ink:         #eef2ef;
+    --ink-2:       #a9b3ae;
+    --ink-3:       #869089;
+    --accent:      #e2941f;
+    --accent-ink:  #1a1206;
+    --accent-soft: #2c2415;
+    --data:        #3987e5;
+    --data-soft:   #17335a;
+    --good:        #0ca30c;
+    --warn:        #fab219;
+    --crit:        #e66767;
+    --shadow:      0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground:      #121614;
+  --surface:     #1a1f1d;
+  --surface-2:   #232926;
+  --line:        #2b322e;
+  --line-strong: #3c443f;
+  --ink:         #eef2ef;
+  --ink-2:       #a9b3ae;
+  --ink-3:       #869089;
+  --accent:      #e2941f;
+  --accent-ink:  #1a1206;
+  --accent-soft: #2c2415;
+  --data:        #3987e5;
+  --data-soft:   #17335a;
+  --good:        #0ca30c;
+  --warn:        #fab219;
+  --crit:        #e66767;
+  --shadow:      0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 15px/1.55 "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 96px; }
+
+/* ---------- masthead ---------- */
+.masthead {
+  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  padding: 28px 0 20px; border-bottom: 1px solid var(--line);
+  margin-bottom: 28px;
+}
+.masthead h1 {
+  margin: 0; font-size: 25px; font-weight: 600; letter-spacing: -.015em;
+  text-wrap: balance;
+}
+.masthead p { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 62ch; }
+.eyebrow {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.spacer { flex: 1 1 auto; }
+
+/* ---------- panels ---------- */
+.panel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+.panel > header {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 14px 18px; border-bottom: 1px solid var(--line);
+}
+.panel > header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.panel .body { padding: 18px; }
+.step {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--surface-2); color: var(--ink-2);
+  font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 600;
+  flex: none;
+}
+.panel[data-state="done"] .step { background: var(--good); color: #fff; }
+
+/* ---------- controls ---------- */
+button {
+  font: inherit; font-weight: 500; cursor: pointer;
+  border-radius: 8px; border: 1px solid var(--line-strong);
+  background: var(--surface); color: var(--ink);
+  padding: 9px 16px; transition: background .12s, border-color .12s, opacity .12s;
+}
+button:hover:not(:disabled) { background: var(--surface-2); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+:is(button, input, select, summary):focus-visible {
+  outline: 2px solid var(--data); outline-offset: 2px;
+}
+input[type="number"], input[type="text"], select {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: 7px; padding: 7px 9px;
+}
+input[type="number"] {
+  font-family: "IBM Plex Mono", monospace; font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+label { font-size: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > .lbl { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.hint { font-size: 12.5px; color: var(--ink-3); margin: 4px 0 0; }
+.grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.checks { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.checks label { display: inline-flex; align-items: center; gap: 7px; }
+.rangerow { display: flex; align-items: center; gap: 12px; }
+.rangerow input[type="range"] { flex: 1 1 auto; accent-color: var(--data); }
+.rangerow output {
+  font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums;
+  font-size: 14px; min-width: 4ch; text-align: right;
+}
+
+/* ---------- file drop ---------- */
+.drop {
+  border: 1.5px dashed var(--line-strong); border-radius: var(--radius);
+  padding: 24px; text-align: center; background: var(--surface-2);
+}
+.drop.over { border-color: var(--data); background: var(--data-soft); }
+.filemeta {
+  font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--ink-2);
+  margin-top: 10px;
+}
+
+/* ---------- progress ---------- */
+.progress { margin-top: 14px; }
+.progress[hidden] { display: none; }
+.track {
+  height: 7px; border-radius: 99px; background: var(--surface-2);
+  overflow: hidden; border: 1px solid var(--line);
+}
+.bar {
+  height: 100%; width: 0%; background: var(--data);
+  transition: width .15s linear;
+}
+.progress .meta {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-family: "IBM Plex Mono", monospace; font-size: 12px;
+  color: var(--ink-2); margin-top: 7px; font-variant-numeric: tabular-nums;
+}
+
+/* ---------- action bar ---------- */
+.actionbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 16px 18px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 20px;
+}
+.actionbar .status { font-size: 13.5px; color: var(--ink-2); }
+
+/* ---------- stat tiles ---------- */
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); }
+.tile {
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 9px; padding: 13px 15px;
+}
+.tile .k {
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.tile .v {
+  font-family: "IBM Plex Mono", monospace; font-size: 23px; font-weight: 600;
+  font-variant-numeric: tabular-nums; margin-top: 3px; letter-spacing: -.02em;
+}
+.tile .sub { font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
+
+/* ---------- species override table ---------- */
+.sp-table-wrap { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+thead th {
+  position: sticky; top: 0; z-index: 1; background: var(--surface-2);
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink-3); font-weight: 500;
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+.sp-table input[type="number"] { width: 88px; padding: 4px 7px; }
+.sp-off td:not(:first-child) { opacity: .4; }
+
+/* ---------- results table ---------- */
+.tablewrap {
+  overflow: auto; border: 1px solid var(--line); border-radius: 8px;
+  max-height: 540px;   /* the CSV holds every row; this stays scannable */
+}
+.tablewrap table { min-width: 780px; }
+.pill {
+  display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px;
+  font-weight: 500; background: var(--surface-2); border: 1px solid var(--line);
+}
+.pill.undef { color: var(--ink-3); }
+.pill.animal { background: var(--data-soft); border-color: transparent; color: var(--ink); }
+
+/* ---------- charts ---------- */
+.charts { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+.chart h3 { margin: 0 0 2px; font-size: 14px; font-weight: 600; }
+.chart .cap { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-3); }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--ink-2); }
+.chart .val { fill: var(--ink); font-weight: 500; }
+.chart .gridline { stroke: var(--line); stroke-width: 1; }
+.chart rect.mark { fill: var(--data); }
+.chart rect.hit { fill: transparent; cursor: pointer; }
+.chart g.row:hover rect.mark, .chart g.col:hover rect.mark { fill: var(--accent); }
+
+.tip {
+  position: fixed; pointer-events: none; z-index: 40; opacity: 0;
+  transition: opacity .1s; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: 7px; padding: 7px 10px;
+  font-size: 12.5px; box-shadow: var(--shadow); max-width: 260px;
+}
+.tip .t-k { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+details.disc > summary {
+  cursor: pointer; padding: 10px 0; font-weight: 500; font-size: 14px;
+  list-style: none; display: flex; align-items: center; gap: 8px;
+}
+details.disc > summary::-webkit-details-marker { display: none; }
+details.disc > summary::before {
+  content: "▸"; color: var(--ink-3); transition: transform .15s; display: inline-block;
+}
+details.disc[open] > summary::before { transform: rotate(90deg); }
+
+.note {
+  border-left: 3px solid var(--warn); background: var(--surface-2);
+  padding: 10px 14px; border-radius: 0 7px 7px 0; font-size: 13.5px; color: var(--ink-2);
+}
+.note.err { border-left-color: var(--crit); }
+.muted { color: var(--ink-3); }
+.mono { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div>
+      <div class="eyebrow">DeepFaune &middot; camera-trap archive</div>
+      <h1>Detection Filter Workbench</h1>
+      <p>Rebuild species predictions from the raw model scores in your master CSV.
+         Set thresholds, drop species that cannot occur, require a minimum burst
+         length, then export the events you want.</p>
+    </div>
+    <div class="spacer"></div>
+    <button id="theme" title="Switch light and dark">Theme</button>
+  </header>
+
+  <!-- 1. LOAD ------------------------------------------------------------- -->
+  <section class="panel" id="p-load">
+    <header><span class="step">1</span><h2>Load the master CSV</h2></header>
+    <div class="body">
+      <div class="drop" id="drop">
+        <button id="pick" class="primary">Choose master CSV</button>
+        <input type="file" id="file" accept=".csv,text/csv" hidden>
+        <p class="hint">Or drag <span class="mono">deepfaune_master.csv</span> here.
+           Nothing is uploaded &mdash; the file is read in your browser.</p>
+        <div class="filemeta" id="filemeta" hidden></div>
+      </div>
+      <div class="progress" id="loadprog" hidden>
+        <div class="track"><div class="bar" id="loadbar"></div></div>
+        <div class="meta"><span id="loadmsg">Reading…</span><span id="loadeta"></span></div>
+      </div>
+      <div id="loadnote" hidden></div>
+    </div>
+  </section>
+
+  <!-- 2. FILTERS ---------------------------------------------------------- -->
+  <section class="panel" id="p-filter" style="opacity:.5;pointer-events:none">
+    <header><span class="step">2</span><h2>Filters</h2>
+      <div class="spacer"></div>
+      <span class="eyebrow" id="candcount"></span>
+    </header>
+    <div class="body">
+      <div class="grid">
+        <div class="field">
+          <span class="lbl">Confidence threshold</span>
+          <div class="rangerow">
+            <input type="range" id="thr" min="0" max="1" step="0.01" value="0.8">
+            <output id="thrOut">0.80</output>
+          </div>
+          <p class="hint">Events scoring below this are labelled <em>undefined</em>.</p>
+        </div>
+        <div class="field">
+          <span class="lbl">Minimum images per event</span>
+          <input type="number" id="minlen" min="1" step="1" value="1">
+          <p class="hint">Drops single-frame events, a common false-trigger signature.</p>
+        </div>
+        <div class="field">
+          <span class="lbl">Include non-animal events</span>
+          <div class="checks">
+            <label><input type="checkbox" id="inc-undefined" checked> undefined</label>
+            <label><input type="checkbox" id="inc-empty"> empty</label>
+            <label><input type="checkbox" id="inc-human"> human</label>
+            <label><input type="checkbox" id="inc-vehicle"> vehicle</label>
+          </div>
+          <p class="hint">Unticked categories are left out of the export entirely.</p>
+        </div>
+      </div>
+
+      <details class="disc" id="spdisc" style="margin-top:6px">
+        <summary>Species: candidates and per-species overrides</summary>
+        <p class="hint" style="margin:0 0 10px">
+          Unticking a species removes it from the candidate set: those detections are
+          re-scored and fall to their next-best species, exactly as if it had been
+          excluded when the archive was classified. Blank override cells use the
+          global values above.
+        </p>
+        <div class="checks" style="margin-bottom:10px">
+          <button type="button" id="sp-all">All species</button>
+          <button type="button" id="sp-none">None</button>
+          <button type="button" id="sp-romania">Romania preset</button>
+        </div>
+        <div class="sp-table-wrap">
+          <table class="sp-table">
+            <thead><tr>
+              <th style="width:34px"></th><th>Species</th>
+              <th class="num" style="width:120px">Threshold</th>
+              <th class="num" style="width:120px">Min images</th>
+            </tr></thead>
+            <tbody id="sptbody"></tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- 3. ACTIONS ---------------------------------------------------------- -->
+  <div class="actionbar" id="actions" style="opacity:.5;pointer-events:none">
+    <button id="generate" class="primary">Generate</button>
+    <button id="download" disabled>Download CSV</button>
+    <span class="status" id="actionstatus">Load a file to begin.</span>
+    <div class="spacer"></div>
+    <div class="progress" id="genprog" hidden style="min-width:230px;margin:0">
+      <div class="track"><div class="bar" id="genbar"></div></div>
+      <div class="meta"><span id="genmsg">Filtering…</span><span id="geneta"></span></div>
+    </div>
+  </div>
+
+  <!-- 4. RESULTS ---------------------------------------------------------- -->
+  <section class="panel" id="p-results" hidden>
+    <header><span class="step">3</span><h2>Results</h2>
+      <div class="spacer"></div>
+      <span class="eyebrow" id="resstamp"></span>
+    </header>
+    <div class="body">
+      <div class="tiles" id="tiles"></div>
+
+      <div class="charts" style="margin-top:22px">
+        <figure class="chart" style="margin:0">
+          <h3>Events by species</h3>
+          <p class="cap" id="cap-species">Top species after filtering.</p>
+          <div id="chart-species"></div>
+        </figure>
+        <figure class="chart" style="margin:0">
+          <h3>Events by month</h3>
+          <p class="cap" id="cap-month">Detection events per calendar month.</p>
+          <div id="chart-month"></div>
+        </figure>
+      </div>
+
+      <h3 style="font-size:14px;margin:26px 0 8px">Events</h3>
+      <p class="hint" id="tablenote" style="margin:0 0 10px"></p>
+      <div class="tablewrap">
+        <table><thead><tr>
+          <th>Species</th><th class="num">Score</th><th class="num">Images</th>
+          <th>Station</th><th>Date</th><th class="num">Runner-up</th>
+        </tr></thead><tbody id="resbody"></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <p class="hint" style="margin-top:26px">
+    Scores are re-derived from the per-class <span class="mono">score_*</span> columns,
+    so thresholds and species exclusions apply retrospectively to the whole archive
+    without reclassifying anything. Events are grouped by
+    <span class="mono">sequence_id</span>; if your CSV predates that column, the
+    folder path and <span class="mono">seqnum</span> are used instead.
+  </p>
+</div>
+
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+
+/* ============================ small utilities ============================ */
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => n.toLocaleString("en-GB");
+const pct = (a, b) => (b ? (100 * a / b).toFixed(1) + "%" : "0%");
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function humanBytes(b) {
+  const u = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return b.toFixed(b < 10 && i > 0 ? 1 : 0) + " " + u[i];
+}
+function humanTime(sec) {
+  if (!isFinite(sec) || sec < 0) return "";
+  if (sec < 60) return Math.max(1, Math.round(sec)) + "s";
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return m + "m " + String(s).padStart(2, "0") + "s";
+}
+
+/* Parse one CSV line. Fast path when the line holds no quotes. */
+function splitCsv(line) {
+  if (line.indexOf('"') === -1) return line.split(",");
+  const out = [];
+  let cur = "", q = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) {
+      if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { out.push(cur); cur = ""; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+const csvCell = (v) => {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+
+/* EXIF "2023:07:28 11:53:01" -> Date, or null. */
+function parseExif(s) {
+  if (!s || s.length < 19) return null;
+  const d = new Date(s.slice(0, 4) + "-" + s.slice(5, 7) + "-" + s.slice(8, 10) + "T" + s.slice(11, 19));
+  return isNaN(d) ? null : d;
+}
+function stationOf(path) {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length >= 3 ? parts.slice(-3, -1).join("/") : (parts[0] || "(unknown)");
+}
+
+/* ============================== app state =============================== */
+const S = {
+  loaded: false, classes: [], K: 0,
+  n: 0, cap: 0,
+  id: [], station: [], firstFile: [],
+  nImg: null, nAnimal: null, nHuman: null, nVehicle: null, nEmpty: null,
+  tMin: null, tMax: null, logs: null,
+  map: new Map(),
+  hasScores: false, rows: 0, results: null,
+};
+
+/* Engine constants: image-level scores were softmaxed at T=1.10; the engine
+   averages sequence logits at T=1.04 (1.10 for a single-image sequence).
+   Averaging log-scores recovers the mean logit up to a per-class-invariant
+   constant, so rescaling by 1.10/T reproduces the sequence softmax exactly. */
+const T_IMAGE = 1.10, T_SEQ = 1.04;
+const LOG_FLOOR = Math.log(5e-5);   // scores are stored to 4dp; 0.0000 floors here
+
+function grow(need) {
+  if (need <= S.cap) return;
+  const cap = Math.max(need, S.cap ? S.cap * 2 : 4096);
+  const copy = (old, Type) => { const a = new Type(cap); if (old) a.set(old); return a; };
+  S.nImg = copy(S.nImg, Int32Array); S.nAnimal = copy(S.nAnimal, Int32Array);
+  S.nHuman = copy(S.nHuman, Int32Array); S.nVehicle = copy(S.nVehicle, Int32Array);
+  S.nEmpty = copy(S.nEmpty, Int32Array);
+  S.tMin = copy(S.tMin, Float64Array); S.tMax = copy(S.tMax, Float64Array);
+  const lg = new Float32Array(cap * S.K); if (S.logs) lg.set(S.logs); S.logs = lg;
+  S.cap = cap;
+}
+
+/* ============================ loading the CSV =========================== */
+async function loadFile(file) {
+  $("filemeta").hidden = false;
+  $("filemeta").textContent = file.name + " · " + humanBytes(file.size);
+  $("loadnote").hidden = true;
+  $("loadprog").hidden = false;
+  setBar("loadbar", 0);
+
+  Object.assign(S, { loaded: false, n: 0, cap: 0, id: [], station: [], firstFile: [],
+    nImg: null, nAnimal: null, nHuman: null, nVehicle: null, nEmpty: null,
+    tMin: null, tMax: null, logs: null, map: new Map(), rows: 0, results: null });
+
+  const reader = file.stream().getReader();
+  const decoder = new TextDecoder("utf-8");
+  let remainder = "", read = 0, header = null, col = {}, scoreIdx = [], seqCol = -1;
+  const t0 = performance.now();
+  let lastPaint = 0;
+
+  const handleHeader = (line) => {
+    header = splitCsv(line).map((h) => h.trim());
+    header.forEach((h, i) => { col[h] = i; });
+    S.classes = []; scoreIdx = [];
+    header.forEach((h, i) => {
+      if (h.startsWith("score_") && h !== "score_seq" && h !== "score_image") {
+        S.classes.push(h.slice(6).replace(/_/g, " ")); scoreIdx.push(i);
+      }
+    });
+    S.K = S.classes.length;
+    S.hasScores = S.K > 0;
+    seqCol = col.sequence_id != null ? col.sequence_id : -1;
+    if (!S.hasScores) {
+      note("loadnote", "err", "This CSV has no per-class <span class='mono'>score_*</span> columns, " +
+        "so predictions cannot be re-derived. Re-export it with dfrun --outputs from a v1.1 or later run.");
+      throw new Error("no score columns");
+    }
+    grow(4096);
+  };
+
+  const handleRow = (line) => {
+    const p = splitCsv(line);
+    if (p.length < header.length - 2) return;
+    const fn = p[col.filename] || "";
+    const key = seqCol >= 0 && p[seqCol] ? p[seqCol]
+      : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p[col.seqnum] || "");
+    let i = S.map.get(key);
+    if (i === undefined) {
+      i = S.n++;
+      grow(S.n);
+      S.map.set(key, i);
+      S.id[i] = key; S.station[i] = stationOf(fn); S.firstFile[i] = fn;
+      S.tMin[i] = Infinity; S.tMax[i] = -Infinity;
+    }
+    S.rows++;
+    S.nImg[i]++;
+    const d = parseExif(p[col.date]);
+    if (d) { const t = d.getTime(); if (t < S.tMin[i]) S.tMin[i] = t; if (t > S.tMax[i]) S.tMax[i] = t; }
+
+    if (p[scoreIdx[0]] !== "" && p[scoreIdx[0]] !== undefined) {
+      S.nAnimal[i]++;
+      const base = i * S.K;
+      for (let j = 0; j < S.K; j++) {
+        const v = +p[scoreIdx[j]];
+        S.logs[base + j] += v > 5e-5 ? Math.log(v) : LOG_FLOOR;
+      }
+    } else {
+      const cat = (p[col.prediction_image] || p[col.prediction_seq] || "").toLowerCase();
+      if (cat === "human") S.nHuman[i]++;
+      else if (cat === "vehicle" || cat === "vehicule") S.nVehicle[i]++;
+      else S.nEmpty[i]++;
+    }
+  };
+
+  let first = true;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    read += value.byteLength;
+    const chunk = remainder + decoder.decode(value, { stream: true });
+    const lines = chunk.split("\n");
+    remainder = lines.pop();
+    for (const raw of lines) {
+      const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+      if (!line) continue;
+      if (first) { handleHeader(line); first = false; } else handleRow(line);
+    }
+    const now = performance.now();
+    if (now - lastPaint > 90) {
+      lastPaint = now;
+      const frac = read / file.size;
+      setBar("loadbar", frac * 100);
+      const rate = read / ((now - t0) / 1000);
+      $("loadmsg").textContent = fmt(S.rows) + " images · " + fmt(S.n) + " events · " +
+        humanBytes(read) + " of " + humanBytes(file.size);
+      $("loadeta").textContent = frac > 0.01 ? "about " + humanTime((file.size - read) / rate) + " left" : "";
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+  if (remainder.trim()) { if (first) handleHeader(remainder); else handleRow(remainder); }
+
+  setBar("loadbar", 100);
+  $("loadmsg").textContent = fmt(S.rows) + " images · " + fmt(S.n) + " events · " + S.K + " species columns";
+  $("loadeta").textContent = "read in " + humanTime((performance.now() - t0) / 1000);
+  S.loaded = true;
+  $("p-load").dataset.state = "done";
+  buildSpeciesTable();
+  enable("p-filter"); enable("actions");
+  $("actionstatus").textContent = "Ready. Set your filters, then press Generate.";
+  invalidate();
+}
+
+function setBar(id, p) { $(id).style.width = Math.max(0, Math.min(100, p)) + "%"; }
+function note(id, kind, html) {
+  const el = $(id);
+  el.hidden = false;
+  el.className = "note" + (kind === "err" ? " err" : "");
+  el.style.marginTop = "14px";
+  el.innerHTML = html;
+}
+function enable(id) { const el = $(id); el.style.opacity = ""; el.style.pointerEvents = ""; }
+
+/* ========================= species override table ======================= */
+const ROMANIA_ABSENT = ["genet", "ibex", "porcupine", "reindeer", "wolverine"];
+
+function buildSpeciesTable() {
+  const tb = $("sptbody");
+  tb.innerHTML = "";
+  S.classes.forEach((name, j) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td><input type="checkbox" class="sp-on" data-j="' + j + '" checked aria-label="Include ' + esc(name) + '"></td>' +
+      "<td>" + esc(name) + "</td>" +
+      '<td class="num"><input type="number" class="sp-thr" data-j="' + j + '" min="0" max="1" step="0.01" placeholder="global"></td>' +
+      '<td class="num"><input type="number" class="sp-len" data-j="' + j + '" min="1" step="1" placeholder="global"></td>';
+    tb.appendChild(tr);
+  });
+  tb.addEventListener("change", (e) => {
+    if (e.target.classList.contains("sp-on")) {
+      e.target.closest("tr").classList.toggle("sp-off", !e.target.checked);
+    }
+    invalidate();
+  });
+  tb.addEventListener("input", invalidate);
+  updateCandCount();
+}
+function setAllSpecies(on, except) {
+  document.querySelectorAll(".sp-on").forEach((cb) => {
+    const name = S.classes[+cb.dataset.j];
+    cb.checked = except ? !except.includes(name) : on;
+    cb.closest("tr").classList.toggle("sp-off", !cb.checked);
+  });
+  invalidate();
+}
+function updateCandCount() {
+  const on = document.querySelectorAll(".sp-on:checked").length;
+  $("candcount").textContent = on + " of " + S.classes.length + " species";
+}
+
+function readFilters() {
+  const gThr = +$("thr").value, gLen = +$("minlen").value || 1;
+  const on = new Uint8Array(S.K).fill(0);
+  const thr = new Float64Array(S.K).fill(gThr);
+  const len = new Int32Array(S.K).fill(gLen);
+  document.querySelectorAll(".sp-on").forEach((cb) => { if (cb.checked) on[+cb.dataset.j] = 1; });
+  document.querySelectorAll(".sp-thr").forEach((el) => { if (el.value !== "") thr[+el.dataset.j] = +el.value; });
+  document.querySelectorAll(".sp-len").forEach((el) => { if (el.value !== "") len[+el.dataset.j] = +el.value || 1; });
+  return {
+    on, thr, len, gLen,
+    incUndefined: $("inc-undefined").checked,
+    incEmpty: $("inc-empty").checked,
+    incHuman: $("inc-human").checked,
+    incVehicle: $("inc-vehicle").checked,
+  };
+}
+
+/* ============================== generation ============================== */
+function classify(i, F) {
+  /* Non-animal events first: the engine only reaches the species step when an
+     image in the sequence actually held an animal box. */
+  if (S.nAnimal[i] === 0) {
+    if (S.nHuman[i] === 0 && S.nVehicle[i] === 0) return { label: "empty", score: 1, kind: "empty" };
+    return S.nHuman[i] >= S.nVehicle[i]
+      ? { label: "human", score: 1, kind: "human" }
+      : { label: "vehicle", score: 1, kind: "vehicle" };
+  }
+  const base = i * S.K, n = S.nAnimal[i];
+  const factor = T_IMAGE / (n > 1 ? T_SEQ : T_IMAGE);
+  let best = -1, bestA = -Infinity, second = -1, secondA = -Infinity;
+  for (let j = 0; j < S.K; j++) {
+    if (!F.on[j]) continue;
+    const a = (S.logs[base + j] / n) * factor;
+    if (a > bestA) { second = best; secondA = bestA; best = j; bestA = a; }
+    else if (a > secondA) { second = j; secondA = a; }
+  }
+  if (best < 0) return { label: "undefined", score: 0, kind: "undefined" };
+  let sum = 0;
+  for (let j = 0; j < S.K; j++) {
+    if (!F.on[j]) continue;
+    sum += Math.exp(((S.logs[base + j] / n) * factor) - bestA);
+  }
+  const score = 1 / sum;
+  const runner = second >= 0 ? S.classes[second] : "";
+  const runnerScore = second >= 0 ? Math.exp(secondA - bestA) * score : 0;
+  const pass = score >= F.thr[best];
+  return {
+    label: pass ? S.classes[best] : "undefined",
+    top1: S.classes[best], score, kind: pass ? "animal" : "undefined",
+    cls: best, runner, runnerScore,
+  };
+}
+
+async function generate() {
+  const F = readFilters();
+  $("genprog").hidden = false;
+  setBar("genbar", 0);
+  const t0 = performance.now();
+  const out = [];
+  const bySpecies = new Map(), byMonth = new Map(), byStation = new Map();
+  let images = 0, dropped = 0;
+
+  const CHUNK = 20000;
+  for (let start = 0; start < S.n; start += CHUNK) {
+    const end = Math.min(S.n, start + CHUNK);
+    for (let i = start; i < end; i++) {
+      const r = classify(i, F);
+      if (r.kind === "empty" && !F.incEmpty) { dropped++; continue; }
+      if (r.kind === "human" && !F.incHuman) { dropped++; continue; }
+      if (r.kind === "vehicle" && !F.incVehicle) { dropped++; continue; }
+      if (r.kind === "undefined" && !F.incUndefined) { dropped++; continue; }
+      const need = r.cls != null && r.kind === "animal" ? F.len[r.cls] : F.gLen;
+      if (S.nImg[i] < need) { dropped++; continue; }
+
+      out.push(i);
+      out.push(r);
+      images += S.nImg[i];
+      bySpecies.set(r.label, (bySpecies.get(r.label) || 0) + 1);
+      byStation.set(S.station[i], (byStation.get(S.station[i]) || 0) + 1);
+      if (isFinite(S.tMin[i])) {
+        const d = new Date(S.tMin[i]);
+        const k = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+        byMonth.set(k, (byMonth.get(k) || 0) + 1);
+      }
+    }
+    const frac = end / S.n;
+    setBar("genbar", frac * 100);
+    const rate = end / ((performance.now() - t0) / 1000);
+    $("genmsg").textContent = fmt(Math.round(end / 2 * 2)) + " of " + fmt(S.n) + " events";
+    $("geneta").textContent = frac < 0.99 ? humanTime((S.n - end) / rate) + " left" : "";
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+
+  const events = out.length / 2;
+  S.results = { pairs: out, events, images, dropped, bySpecies, byMonth, byStation, F };
+  setBar("genbar", 100);
+  $("genmsg").textContent = fmt(events) + " events kept";
+  $("geneta").textContent = "in " + humanTime((performance.now() - t0) / 1000);
+  renderResults();
+  $("download").disabled = events === 0;
+  $("actionstatus").textContent = events
+    ? "Generated. Download is ready."
+    : "No events matched these filters — try relaxing the threshold.";
+  $("resstamp").textContent = "threshold " + (+$("thr").value).toFixed(2) +
+    " · " + document.querySelectorAll(".sp-on:checked").length + " species";
+}
+
+function invalidate() {
+  updateCandCount();
+  if (!S.loaded) return;
+  S.results = null;
+  $("download").disabled = true;
+  $("genprog").hidden = true;
+  $("actionstatus").textContent = "Filters changed — press Generate to update.";
+}
+
+/* ============================== rendering =============================== */
+function renderResults() {
+  const R = S.results;
+  $("p-results").hidden = false;
+
+  const species = [...R.bySpecies.entries()].sort((a, b) => b[1] - a[1]);
+  const animals = species.filter(([k]) => !["empty", "human", "vehicle", "undefined"].includes(k));
+  const animalEvents = animals.reduce((s, [, v]) => s + v, 0);
+
+  $("tiles").innerHTML = [
+    tile("Events kept", fmt(R.events), pct(R.events, S.n) + " of " + fmt(S.n) + " total"),
+    tile("Images covered", fmt(R.images), pct(R.images, S.rows) + " of the archive"),
+    tile("Animal events", fmt(animalEvents), animals.length + " species present"),
+    tile("Filtered out", fmt(R.dropped), "below threshold, length or excluded"),
+  ].join("");
+
+  barChart("chart-species", animals.slice(0, 12).map(([k, v]) => ({ label: k, value: v })), "events");
+  $("cap-species").textContent = animals.length > 12
+    ? "Top 12 of " + animals.length + " species, by number of events."
+    : "All species present, by number of events.";
+
+  const months = [...R.byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  colChart("chart-month", months.map(([k, v]) => ({ label: k, value: v })));
+  $("cap-month").textContent = months.length
+    ? months.length + " months, " + months[0][0] + " to " + months[months.length - 1][0] + "."
+    : "No dated events.";
+
+  const LIMIT = 300;
+  const tb = $("resbody");
+  tb.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (let k = 0; k < Math.min(R.events, LIMIT); k++) {
+    const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
+    const tr = document.createElement("tr");
+    const when = isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 16).replace("T", " ") : "—";
+    tr.innerHTML =
+      '<td><span class="pill ' + (r.kind === "animal" ? "animal" : "undef") + '">' + esc(r.label) + "</span></td>" +
+      '<td class="num">' + r.score.toFixed(3) + "</td>" +
+      '<td class="num">' + S.nImg[i] + "</td>" +
+      "<td>" + esc(S.station[i]) + "</td>" +
+      '<td class="num">' + when + "</td>" +
+      '<td class="num muted">' + (r.runner ? esc(r.runner) + " " + r.runnerScore.toFixed(2) : "—") + "</td>";
+    frag.appendChild(tr);
+  }
+  tb.appendChild(frag);
+  $("tablenote").textContent = R.events > LIMIT
+    ? "Showing the first " + LIMIT + " of " + fmt(R.events) + " events. The CSV holds them all."
+    : fmt(R.events) + " events.";
+}
+const tile = (k, v, sub) =>
+  '<div class="tile"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) +
+  '</div><div class="sub">' + esc(sub) + "</div></div>";
+
+/* ------------------------------- charts -------------------------------- */
+const tip = $("tip");
+function showTip(e, html) {
+  tip.innerHTML = html;
+  tip.style.opacity = "1";
+  const pad = 14;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  const r = tip.getBoundingClientRect();
+  if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
+  if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+const hideTip = () => { tip.style.opacity = "0"; };
+
+function barChart(mountId, data, unit) {
+  const mount = $(mountId);
+  if (!data.length) { mount.innerHTML = '<p class="hint">Nothing to show.</p>'; return; }
+  const rowH = 26, gap = 6, padL = 132, padR = 56, W = 520;
+  const H = data.length * (rowH + gap) + 8;
+  const max = Math.max(...data.map((d) => d.value));
+  const scale = (v) => Math.max(2, (v / max) * (W - padL - padR));
+  let s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Events by species">';
+  data.forEach((d, i) => {
+    const y = i * (rowH + gap);
+    const w = scale(d.value);
+    s += '<g class="row">' +
+      '<text x="' + (padL - 10) + '" y="' + (y + rowH * 0.68) + '" text-anchor="end">' + esc(d.label) + "</text>" +
+      '<rect class="mark" x="' + padL + '" y="' + y + '" width="' + w + '" height="' + rowH + '" rx="4"></rect>' +
+      '<text class="val" x="' + (padL + w + 8) + '" y="' + (y + rowH * 0.68) + '">' + fmt(d.value) + "</text>" +
+      '<rect class="hit" x="0" y="' + y + '" width="' + W + '" height="' + rowH + '"' +
+      ' data-l="' + esc(d.label) + '" data-v="' + d.value + '"></rect>' +
+      "</g>";
+  });
+  s += "</svg>";
+  mount.innerHTML = s;
+  wireHits(mount, unit);
+}
+
+function colChart(mountId, data) {
+  const mount = $(mountId);
+  if (!data.length) { mount.innerHTML = '<p class="hint">Nothing to show.</p>'; return; }
+  const W = 520, H = 220, padB = 34, padL = 44, padT = 10;
+  const max = Math.max(...data.map((d) => d.value));
+  const bw = (W - padL - 8) / data.length;
+  const y = (v) => padT + (1 - v / max) * (H - padT - padB);
+  let s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Events by month">';
+  for (let g = 0; g <= 3; g++) {
+    const v = (max / 3) * g, yy = y(v);
+    s += '<line class="gridline" x1="' + padL + '" x2="' + W + '" y1="' + yy + '" y2="' + yy + '"></line>' +
+      '<text x="' + (padL - 8) + '" y="' + (yy + 4) + '" text-anchor="end">' + fmt(Math.round(v)) + "</text>";
+  }
+  data.forEach((d, i) => {
+    const x = padL + i * bw, h = Math.max(2, (H - padT - padB) - (y(d.value) - padT));
+    s += '<g class="col">' +
+      '<rect class="mark" x="' + (x + 1) + '" y="' + y(d.value) + '" width="' + Math.max(1, bw - 2) +
+      '" height="' + h + '" rx="3"></rect>' +
+      '<rect class="hit" x="' + x + '" y="' + padT + '" width="' + bw + '" height="' + (H - padT - padB) + '"' +
+      ' data-l="' + esc(d.label) + '" data-v="' + d.value + '"></rect>' + "</g>";
+  });
+  const step = Math.ceil(data.length / 8);
+  data.forEach((d, i) => {
+    if (i % step) return;
+    s += '<text x="' + (padL + i * bw + bw / 2) + '" y="' + (H - padB + 16) +
+      '" text-anchor="middle">' + esc(d.label) + "</text>";
+  });
+  s += "</svg>";
+  mount.innerHTML = s;
+  wireHits(mount, "events");
+}
+
+function wireHits(mount, unit) {
+  mount.querySelectorAll("rect.hit").forEach((r) => {
+    r.addEventListener("mousemove", (e) =>
+      showTip(e, "<div>" + esc(r.dataset.l) + '</div><div class="t-k">' +
+        fmt(+r.dataset.v) + " " + unit + "</div>"));
+    r.addEventListener("mouseleave", hideTip);
+  });
+  mount.addEventListener("mouseleave", hideTip);
+}
+
+/* =============================== download =============================== */
+function downloadCsv() {
+  const R = S.results;
+  if (!R) return;
+  const head = ["sequence_id", "prediction", "score", "top1", "runner_up", "runner_up_score",
+    "n_images", "n_animal_images", "n_human_images", "n_vehicle_images",
+    "station", "date_start", "date_end", "example_image"];
+  const parts = [head.join(",") + "\n"];
+  let buf = "";
+  for (let k = 0; k < R.events; k++) {
+    const i = R.pairs[k * 2], r = R.pairs[k * 2 + 1];
+    buf += [
+      csvCell(S.id[i]), csvCell(r.label), r.score.toFixed(4), csvCell(r.top1 || r.label),
+      csvCell(r.runner || ""), r.runner ? r.runnerScore.toFixed(4) : "",
+      S.nImg[i], S.nAnimal[i], S.nHuman[i], S.nVehicle[i],
+      csvCell(S.station[i]),
+      isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 19).replace("T", " ") : "",
+      isFinite(S.tMax[i]) ? new Date(S.tMax[i]).toISOString().slice(0, 19).replace("T", " ") : "",
+      csvCell(S.firstFile[i]),
+    ].join(",") + "\n";
+    if (buf.length > 1 << 20) { parts.push(buf); buf = ""; }
+  }
+  if (buf) parts.push(buf);
+  const url = URL.createObjectURL(new Blob(parts, { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = "deepfaune_filtered_" + stamp + ".csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/* ================================ wiring ================================ */
+$("pick").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", (e) => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+const drop = $("drop");
+["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => {
+  e.preventDefault(); drop.classList.add("over");
+}));
+["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => {
+  e.preventDefault(); drop.classList.remove("over");
+}));
+drop.addEventListener("drop", (e) => {
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+
+$("thr").addEventListener("input", () => {
+  $("thrOut").textContent = (+$("thr").value).toFixed(2);
+  invalidate();
+});
+$("minlen").addEventListener("input", invalidate);
+["inc-undefined", "inc-empty", "inc-human", "inc-vehicle"].forEach((id) =>
+  $(id).addEventListener("change", invalidate));
+$("sp-all").addEventListener("click", () => setAllSpecies(true));
+$("sp-none").addEventListener("click", () => setAllSpecies(false));
+$("sp-romania").addEventListener("click", () => setAllSpecies(true, ROMANIA_ABSENT));
+$("generate").addEventListener("click", () => { $("generate").disabled = true; generate().finally(() => { $("generate").disabled = false; }); });
+$("download").addEventListener("click", downloadCsv);
+$("theme").addEventListener("click", () => {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const cur = document.documentElement.getAttribute("data-theme") || (dark ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+});
+</script>
+</body>
+</html>

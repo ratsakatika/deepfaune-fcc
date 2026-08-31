@@ -230,6 +230,18 @@ after adding or removing shard CSVs, or to apply derived columns (such as
 `--source /path/to/archive` to set the root the image paths are normalised
 onto, when the drive has since been remounted elsewhere.
 
+## Filtering workbench
+
+`deepfaune_filter.html` on the Desktop (source: `filter_workbench.html`) opens in
+a browser and reads the master CSV locally - nothing is uploaded. Because the
+`score_*` columns hold the complete distribution over every animal class, it
+re-derives predictions rather than just filtering the ones already written: set a
+global or per-species confidence threshold, require a minimum number of images
+per event, and untick species that cannot occur so their detections fall to the
+next-best species, exactly as if they had been excluded at classification time.
+It shows the surviving events as summary tiles, charts and a table, then exports
+them as a CSV. Events are grouped by `sequence_id`.
+
 ## Auto-resume service
 
 `dfrun --install-service` installs a systemd unit, `deepfaune-worker.service`,

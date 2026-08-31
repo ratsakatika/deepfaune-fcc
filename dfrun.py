@@ -43,7 +43,7 @@ TOOL_NAME = "dfrun"
 # for medium features, first for complete overhauls. See CLAUDE.md
 # ("Versioning") - the self-updater shows this to users, so a stale number
 # makes different code report the same version.
-TOOL_VERSION = "1.6.0"
+TOOL_VERSION = "1.5.3"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (

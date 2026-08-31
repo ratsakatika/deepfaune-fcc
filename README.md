@@ -230,25 +230,6 @@ after adding or removing shard CSVs, or to apply derived columns (such as
 `--source /path/to/archive` to set the root the image paths are normalised
 onto, when the drive has since been remounted elsewhere.
 
-## Choosing a detector
-
-Detector choice is the one setting that cannot be revisited later: a threshold
-or a species exclusion can be re-derived from the recorded scores, but a box
-the detector never found is gone. `benchmark_detectors.py` puts numbers under
-that decision - it times each detector on a random sample of real archive
-images and extrapolates to a full pass:
-
-```
-python benchmark_detectors.py --images 150 --detectors DF,DFbsMDS,DFMDS,MDR
-```
-
-Each detector runs in its own subprocess so model loading and memory cannot
-leak between measurements, and only the classification is timed. Images are
-sampled from `master.csv` so the mix of empty and animal frames is
-representative - which matters, because DFbsMDS runs its second detector only
-on frames where the first found nothing. Stop any running worker first
-(`dfrun --stop`); its CPU use would skew every number.
-
 ## Filtering workbench
 
 `filter_master_results.html` on the Desktop opens in

@@ -43,7 +43,7 @@ TOOL_NAME = "dfrun"
 # for medium features, first for complete overhauls. See CLAUDE.md
 # ("Versioning") - the self-updater shows this to users, so a stale number
 # makes different code report the same version.
-TOOL_VERSION = "1.5.6"
+TOOL_VERSION = "1.5.7"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -239,11 +239,11 @@ def self_update_check(args, repo_dir, worker_is_running, prompt=None):
     """Stage 0: check for a newer version and offer a fast-forward update.
 
     Fails open: any problem prints a short line and returns without disrupting
-    the run. Returns True only if it has re-exec'd (it will not return then).
+    the run. After a successful update it EXITS the program: the user relaunches
+    and the new code loads from a clean start, so an old process can never keep
+    running against the updated checkout.
     """
     prompt = prompt or _default_prompt
-    if os.environ.get("DFRUN_UPDATED") == "1":
-        return False  # already re-exec'd once this launch; avoid loops
     config = load_config()
     preference = args.update_check or config.get("update_check") or "auto"
     if preference == "never":
@@ -292,10 +292,13 @@ def self_update_check(args, repo_dir, worker_is_running, prompt=None):
     new_hash = git_rev(repo_dir, "HEAD")
     print(f"Updated {old_hash[:10]} -> {new_hash[:10]}.")
     print(f"To roll back: git reset --hard {old_hash}")
-    # Re-exec so the new code takes effect, passing through the original args.
-    os.environ["DFRUN_UPDATED"] = "1"
-    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
-    return True  # not reached
+    # Exit rather than continue: this process still holds the old code in
+    # memory, and mixing it with the updated checkout invites subtle bugs.
+    # A clean relaunch is unambiguous.
+    print()
+    print(f"Update complete. {TOOL_NAME} will now close;")
+    print(f"run {TOOL_NAME} again (or open the Desktop icon) to continue on the new version.")
+    sys.exit(0)
 
 
 def _default_prompt(message):

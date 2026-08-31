@@ -98,7 +98,7 @@ What each setting does:
 Note there is no species-exclusion setting here. Excluding species that cannot
 occur in the survey area is a filtering decision, not a classification one: the
 raw `score_*` columns are recorded for every class regardless, so the same
-exclusion applied in `filter_master_results.html` gives an identical result and
+exclusion applied in `dashboard_and_filter.html` gives an identical result and
 can be undone, while excluding during classification is permanent and splits
 the archive if it is ever changed mid-run. `deepfaune_batch.py` keeps an
 `--exclude-classes` flag only so a run started before this changed can be
@@ -229,19 +229,24 @@ after adding or removing shard CSVs, or to apply derived columns (such as
 `--source /path/to/archive` to set the root the image paths are normalised
 onto, when the drive has since been remounted elsewhere.
 
-## Filtering workbench
+## Dashboard and result filter
 
-`filter_master_results.html` on the Desktop opens in
-a browser and reads the master CSV locally - nothing is uploaded. Because the
-`score_*` columns hold the complete distribution over every animal class, it
-re-derives predictions rather than just filtering the ones already written: set a
-global or per-species confidence threshold (typed or by slider), require a
-minimum sequence length in seconds, and untick species that cannot occur so
-their detections fall to the next-best species. The events table names the
-species the model chose even when it scored below the threshold, shown in red,
-rather than hiding it behind "undefined".
-It shows the surviving events as summary tiles, charts and a table, then exports
-them as a CSV. Events are grouped by `sequence_id`.
+`dashboard_and_filter.html` on the Desktop opens in a browser and reads the
+master CSV locally - nothing is uploaded. When served from the out-dir (for
+example `python3 -m http.server 8000` next to the master file) it loads
+`deepfaune_master.csv` automatically; opened any other way, choose or drag the
+file in. Because the `score_*` columns hold the complete distribution over
+every animal class, it re-derives predictions rather than just filtering the
+ones already written: set a global or per-species confidence threshold (typed
+or by slider), require a minimum sequence length in seconds, and untick species
+that cannot occur so their detections fall to the next-best species. The events
+table shows the top three species with scores to three decimal places, naming
+the top choice even when it scored below the threshold (shown in red rather
+than hidden behind "undefined"). Summary tiles and charts cover species,
+months, hour of day and busiest stations; events whose camera clock was wrong
+(1970 dates) are counted but left off the time charts. Each figure saves as
+PNG or SVG, the species summary saves as a CSV, and the filtered events export
+as a CSV with `top2`/`top3` columns. Events are grouped by `sequence_id`.
 
 ## Auto-resume service
 

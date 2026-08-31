@@ -1671,7 +1671,7 @@ def build_arg_parser():
              "never predict. Retained so a run started with exclusions can be "
              "resumed consistently; do not use it for new runs. Excluding here "
              "is permanent, while the raw score_* columns let the same choice "
-             "be made (and undone) later in filter_master_results.html.",
+             "be made (and undone) later in dashboard_and_filter.html.",
     )
     parser.add_argument(
         "--min-avail-gib", type=float, default=0,

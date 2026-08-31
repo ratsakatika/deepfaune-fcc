@@ -63,10 +63,11 @@ EOF
     echo "Installed guide: ${DESKTOP_DIR}/How_to_use_dfrun.html"
   fi
 
-  # Filtering workbench: opens in a browser, reads the master CSV locally.
-  if [ -f "${REPO_DIR}/filter_master_results.html" ]; then
-    cp "${REPO_DIR}/filter_master_results.html" "${DESKTOP_DIR}/filter_master_results.html"
-    echo "Installed workbench: ${DESKTOP_DIR}/filter_master_results.html"
+  # Dashboard and result filter: opens in a browser, reads the master CSV locally.
+  if [ -f "${REPO_DIR}/dashboard_and_filter.html" ]; then
+    cp "${REPO_DIR}/dashboard_and_filter.html" "${DESKTOP_DIR}/dashboard_and_filter.html"
+    echo "Installed dashboard and filter: ${DESKTOP_DIR}/dashboard_and_filter.html"
+    rm -f "${DESKTOP_DIR}/filter_master_results.html"
   fi
 else
   echo "No ${DESKTOP_DIR}; skipped the Desktop shortcut."

@@ -43,7 +43,7 @@ TOOL_NAME = "dfrun"
 # for medium features, first for complete overhauls. See CLAUDE.md
 # ("Versioning") - the self-updater shows this to users, so a stale number
 # makes different code report the same version.
-TOOL_VERSION = "1.5.2"
+TOOL_VERSION = "1.5.3"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -94,7 +94,7 @@ DESKTOP_WILDLIFE = "deepfaune_wildlife.csv"
 DESKTOP_SUMMARY = "deepfaune_summary.csv"
 DESKTOP_DASHBOARD = "deepfaune_dashboard.html"
 DESKTOP_GUIDE = "How_to_use_dfrun.html"
-DESKTOP_WORKBENCH = "deepfaune_filter.html"
+DESKTOP_WORKBENCH = "filter_master_results.html"
 
 # The dashboard builder (in the software dir) and the field protocol it reads.
 DASHBOARD_BUILDER = "build_dashboard.py"

@@ -64,9 +64,9 @@ EOF
   fi
 
   # Filtering workbench: opens in a browser, reads the master CSV locally.
-  if [ -f "${REPO_DIR}/filter_workbench.html" ]; then
-    cp "${REPO_DIR}/filter_workbench.html" "${DESKTOP_DIR}/deepfaune_filter.html"
-    echo "Installed workbench: ${DESKTOP_DIR}/deepfaune_filter.html"
+  if [ -f "${REPO_DIR}/filter_master_results.html" ]; then
+    cp "${REPO_DIR}/filter_master_results.html" "${DESKTOP_DIR}/filter_master_results.html"
+    echo "Installed workbench: ${DESKTOP_DIR}/filter_master_results.html"
   fi
 else
   echo "No ${DESKTOP_DIR}; skipped the Desktop shortcut."

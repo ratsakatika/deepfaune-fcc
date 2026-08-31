@@ -331,9 +331,10 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
           <p class="hint">Events scoring below this are labelled <em>undefined</em>.</p>
         </div>
         <div class="field">
-          <span class="lbl">Minimum images per event</span>
-          <input type="number" id="minlen" min="1" step="1" value="1">
-          <p class="hint">Drops single-frame events, a common false-trigger signature.</p>
+          <span class="lbl">Minimum sequence length (seconds)</span>
+          <input type="number" id="minlen" min="0" step="1" value="0">
+          <p class="hint">Elapsed time from the first to the last photograph in the
+             event. A single-photograph event is 0 seconds.</p>
         </div>
         <div class="field">
           <span class="lbl">Include non-animal events</span>
@@ -365,7 +366,7 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
             <thead><tr>
               <th style="width:34px"></th><th>Species</th>
               <th class="num" style="width:120px">Threshold</th>
-              <th class="num" style="width:120px">Min images</th>
+              <th class="num" style="width:120px">Min seconds</th>
             </tr></thead>
             <tbody id="sptbody"></tbody>
           </table>
@@ -413,7 +414,7 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
       <div class="tablewrap">
         <table><thead><tr>
           <th>Species</th><th class="num">Score</th><th class="num">Images</th>
-          <th>Station</th><th>Date</th><th class="num">Runner-up</th>
+          <th class="num">Length</th><th>Station</th><th>Date</th><th class="num">Runner-up</th>
         </tr></thead><tbody id="resbody"></tbody></table>
       </div>
     </div>
@@ -424,7 +425,9 @@ details.disc[open] > summary::before { transform: rotate(90deg); }
     so thresholds and species exclusions apply retrospectively to the whole archive
     without reclassifying anything. Events are grouped by
     <span class="mono">sequence_id</span>; if your CSV predates that column, the
-    folder path and <span class="mono">seqnum</span> are used instead.
+    folder path and <span class="mono">seqnum</span> are used instead. Sequence
+    length is the elapsed time across an event; the grouping itself was fixed by
+    the <span class="mono">maxlag</span> used when the archive was classified.
   </p>
 </div>
 
@@ -479,6 +482,13 @@ function parseExif(s) {
   if (!s || s.length < 19) return null;
   const d = new Date(s.slice(0, 4) + "-" + s.slice(5, 7) + "-" + s.slice(8, 10) + "T" + s.slice(11, 19));
   return isNaN(d) ? null : d;
+}
+/* Sequence length: elapsed seconds from the first to the last photograph.
+   The engine chains photos into a sequence while each is within maxlag of the
+   previous one, so an event's span is not bounded by maxlag - it is this
+   elapsed time. Undated events count as 0. */
+function seqSeconds(i) {
+  return isFinite(S.tMin[i]) && isFinite(S.tMax[i]) ? (S.tMax[i] - S.tMin[i]) / 1000 : 0;
 }
 function stationOf(path) {
   const parts = path.split("/").filter(Boolean);
@@ -647,7 +657,7 @@ function buildSpeciesTable() {
       '<td><input type="checkbox" class="sp-on" data-j="' + j + '" checked aria-label="Include ' + esc(name) + '"></td>' +
       "<td>" + esc(name) + "</td>" +
       '<td class="num"><input type="number" class="sp-thr" data-j="' + j + '" min="0" max="1" step="0.01" placeholder="global"></td>' +
-      '<td class="num"><input type="number" class="sp-len" data-j="' + j + '" min="1" step="1" placeholder="global"></td>';
+      '<td class="num"><input type="number" class="sp-len" data-j="' + j + '" min="0" step="1" placeholder="global"></td>';
     tb.appendChild(tr);
   });
   tb.addEventListener("change", (e) => {
@@ -673,13 +683,13 @@ function updateCandCount() {
 }
 
 function readFilters() {
-  const gThr = +$("thr").value, gLen = +$("minlen").value || 1;
+  const gThr = +$("thr").value, gLen = Math.max(0, +$("minlen").value || 0);
   const on = new Uint8Array(S.K).fill(0);
   const thr = new Float64Array(S.K).fill(gThr);
-  const len = new Int32Array(S.K).fill(gLen);
+  const len = new Float64Array(S.K).fill(gLen);   // seconds, not image count
   document.querySelectorAll(".sp-on").forEach((cb) => { if (cb.checked) on[+cb.dataset.j] = 1; });
   document.querySelectorAll(".sp-thr").forEach((el) => { if (el.value !== "") thr[+el.dataset.j] = +el.value; });
-  document.querySelectorAll(".sp-len").forEach((el) => { if (el.value !== "") len[+el.dataset.j] = +el.value || 1; });
+  document.querySelectorAll(".sp-len").forEach((el) => { if (el.value !== "") len[+el.dataset.j] = Math.max(0, +el.value || 0); });
   return {
     on, thr, len, gLen,
     incUndefined: $("inc-undefined").checked,
@@ -744,7 +754,7 @@ async function generate() {
       if (r.kind === "vehicle" && !F.incVehicle) { dropped++; continue; }
       if (r.kind === "undefined" && !F.incUndefined) { dropped++; continue; }
       const need = r.cls != null && r.kind === "animal" ? F.len[r.cls] : F.gLen;
-      if (S.nImg[i] < need) { dropped++; continue; }
+      if (need > 0 && seqSeconds(i) < need) { dropped++; continue; }
 
       out.push(i);
       out.push(r);
@@ -827,6 +837,7 @@ function renderResults() {
       '<td><span class="pill ' + (r.kind === "animal" ? "animal" : "undef") + '">' + esc(r.label) + "</span></td>" +
       '<td class="num">' + r.score.toFixed(3) + "</td>" +
       '<td class="num">' + S.nImg[i] + "</td>" +
+      '<td class="num">' + fmtSecs(seqSeconds(i)) + "</td>" +
       "<td>" + esc(S.station[i]) + "</td>" +
       '<td class="num">' + when + "</td>" +
       '<td class="num muted">' + (r.runner ? esc(r.runner) + " " + r.runnerScore.toFixed(2) : "—") + "</td>";
@@ -836,6 +847,11 @@ function renderResults() {
   $("tablenote").textContent = R.events > LIMIT
     ? "Showing the first " + LIMIT + " of " + fmt(R.events) + " events. The CSV holds them all."
     : fmt(R.events) + " events.";
+}
+function fmtSecs(s) {
+  if (s < 60) return Math.round(s) + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m " + String(Math.round(s % 60)).padStart(2, "0") + "s";
+  return (s / 3600).toFixed(1) + "h";
 }
 const tile = (k, v, sub) =>
   '<div class="tile"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) +
@@ -926,7 +942,7 @@ function downloadCsv() {
   const R = S.results;
   if (!R) return;
   const head = ["sequence_id", "prediction", "score", "top1", "runner_up", "runner_up_score",
-    "n_images", "n_animal_images", "n_human_images", "n_vehicle_images",
+    "sequence_seconds", "n_images", "n_animal_images", "n_human_images", "n_vehicle_images",
     "station", "date_start", "date_end", "example_image"];
   const parts = [head.join(",") + "\n"];
   let buf = "";
@@ -935,7 +951,7 @@ function downloadCsv() {
     buf += [
       csvCell(S.id[i]), csvCell(r.label), r.score.toFixed(4), csvCell(r.top1 || r.label),
       csvCell(r.runner || ""), r.runner ? r.runnerScore.toFixed(4) : "",
-      S.nImg[i], S.nAnimal[i], S.nHuman[i], S.nVehicle[i],
+      Math.round(seqSeconds(i)), S.nImg[i], S.nAnimal[i], S.nHuman[i], S.nVehicle[i],
       csvCell(S.station[i]),
       isFinite(S.tMin[i]) ? new Date(S.tMin[i]).toISOString().slice(0, 19).replace("T", " ") : "",
       isFinite(S.tMax[i]) ? new Date(S.tMax[i]).toISOString().slice(0, 19).replace("T", " ") : "",

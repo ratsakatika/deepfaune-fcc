@@ -28,6 +28,7 @@ import argparse
 import csv
 import glob
 import hashlib
+import itertools
 import json
 import logging
 import os
@@ -308,6 +309,58 @@ def iter_shard_csvs(out_dir, exclude=()):
         yield path
 
 
+# The merge derives these from each shard, so old shards gain them too.
+SEQUENCE_ID_COLUMN = "sequence_id"
+SHARD_HASH_RE = re.compile(r"__([0-9a-f]{8})\.csv$")
+
+
+def shard_hash_from_name(name):
+    """The 8-hex shard hash embedded in a shard CSV name, or None."""
+    match = SHARD_HASH_RE.search(os.path.basename(name))
+    return match.group(1) if match else None
+
+
+def sequence_id(shard_hash, seqnum):
+    """A globally unique detection-event key: shard hash plus seqnum.
+
+    The engine restarts sequence numbering at 1 in every shard, so seqnum on
+    its own is only unique within one folder. The shard hash is the sha1 of
+    the folder's archive-relative path, so the pair is unique archive-wide
+    and stable across re-merges and reprocessing.
+    """
+    if not shard_hash or seqnum in (None, ""):
+        return ""
+    return f"{shard_hash}-{seqnum}"
+
+
+def shard_relpath_from_row(csv_name, dirname):
+    """Recover a shard's archive-relative directory from one of its rows.
+
+    shard_csv_name ends with sha1(relpath)[:8], so every split of the row's
+    absolute directory can be tested and the one whose hash matches is the
+    true relative path. This identifies the archive root prefix without
+    guessing, which is what lets paths recorded under a differently named
+    mount be re-rooted exactly. Returns None when nothing matches (in which
+    case callers leave the path untouched).
+    """
+    want = shard_hash_from_name(csv_name)
+    if not want or not dirname:
+        return None
+    parts = [p for p in dirname.replace("\\", "/").split("/") if p]
+    for start in range(len(parts)):
+        rel = "/".join(parts[start:])
+        if hashlib.sha1(rel.encode("utf-8")).hexdigest()[:8] == want:
+            return rel
+    return None
+
+
+def rerooted_path(path, canonical_root, rel):
+    """Rewrite an image path to sit under canonical_root/rel."""
+    if not path or not canonical_root or rel is None:
+        return path
+    return f"{canonical_root.rstrip('/')}/{rel}/{os.path.basename(path)}"
+
+
 def sanitize_column(name):
     """Turn a class label into a safe CSV column suffix (spaces -> underscores)."""
     return re.sub(r"[^A-Za-z0-9]+", "_", str(name).strip()).strip("_")
@@ -360,7 +413,7 @@ def shard_header_union(out_dir, exclude=()):
     return columns
 
 
-def merge_csvs(out_dir, merge_out, header=None):
+def merge_csvs(out_dir, merge_out, header=None, canonical_root=None):
     """Stream-concatenate the per-shard CSVs in out_dir into merge_out.
 
     The header is written once; each source file's own header row is read and
@@ -368,6 +421,18 @@ def merge_csvs(out_dir, merge_out, header=None):
     shards written by different tool versions (for example old shards without
     the per-class score columns) merge cleanly, with missing cells left blank.
     When header is None (the default) the union of the shard headers is used.
+
+    Two columns are derived here rather than in the shards, so that they apply
+    uniformly to every row including shards written by older versions:
+
+    - sequence_id, a globally unique detection-event key. The engine numbers
+      sequences per shard, restarting at 1 in every folder, so seqnum alone
+      collides across the archive; sequence_id pairs the shard's own hash with
+      seqnum and is therefore unique archive-wide.
+    - filename, rewritten under canonical_root when given, so a run resumed
+      with the drive mounted under a different name (My Book1 vs My Book2)
+      still produces one consistent set of paths.
+
     Rows go through csv.writer so quoting stays correct, and files are
     streamed, not loaded whole. The write is atomic (temp then rename) and
     merge_out is excluded from the inputs, so this is an idempotent rebuild
@@ -380,6 +445,10 @@ def merge_csvs(out_dir, merge_out, header=None):
     sources = list(iter_shard_csvs(out_dir, exclude=[merge_out]))
     if header is None:
         header = shard_header_union(out_dir, exclude=[merge_out])
+    if SEQUENCE_ID_COLUMN not in header:
+        header = list(header) + [SEQUENCE_ID_COLUMN]
+    seqid_out = header.index(SEQUENCE_ID_COLUMN)
+    filename_out = header.index("filename") if "filename" in header else None
     fd, tmp = tempfile.mkstemp(
         dir=directory, prefix=os.path.basename(merge_out) + ".", suffix=".tmp"
     )
@@ -396,21 +465,38 @@ def merge_csvs(out_dir, merge_out, header=None):
                         src_header = next(reader)
                     except StopIteration:
                         continue  # empty file
+                    first = next(reader, None)
+                    if first is None:
+                        n_files += 1
+                        continue  # header only, no rows
                     n_files += 1
-                    if src_header == header:
-                        # Fast path: columns already line up; copy rows through.
-                        for row in reader:
-                            writer.writerow(row)
-                            n_rows += 1
-                        continue
-                    # Re-map by column name; absent columns stay blank.
                     positions = {col: i for i, col in enumerate(src_header)}
                     indices = [positions.get(col) for col in header]
-                    for row in reader:
-                        writer.writerow([
+                    seq_idx = positions.get("seqnum")
+                    fn_idx = positions.get("filename")
+                    shard_hash = shard_hash_from_name(src)
+                    # Recover this shard's archive-relative directory from any
+                    # of its rows, so its paths can be re-rooted (see
+                    # shard_relpath_from_row). Skipped when not rewriting.
+                    rel = None
+                    if canonical_root and filename_out is not None and fn_idx is not None:
+                        if fn_idx < len(first):
+                            rel = shard_relpath_from_row(src, os.path.dirname(first[fn_idx]))
+                    for row in itertools.chain([first], reader):
+                        out_row = [
                             row[i] if i is not None and i < len(row) else ""
                             for i in indices
-                        ])
+                        ]
+                        seq = (
+                            row[seq_idx]
+                            if seq_idx is not None and seq_idx < len(row) else ""
+                        )
+                        out_row[seqid_out] = sequence_id(shard_hash, seq)
+                        if rel is not None:
+                            out_row[filename_out] = rerooted_path(
+                                out_row[filename_out], canonical_root, rel
+                            )
+                        writer.writerow(out_row)
                         n_rows += 1
             out.flush()
             os.fsync(out.fileno())
@@ -1180,8 +1266,15 @@ def merge_mode(args):
         if args.merge_out
         else os.path.join(out_dir, "master.csv")
     )
-    n_files, n_rows = merge_csvs(out_dir, merge_out)
+    # Standalone rebuild: re-root paths on the run's own archive root when
+    # --root was given, else on the root the last run recorded.
+    canonical_root = args.root
+    if not canonical_root:
+        canonical_root = (load_resume_metadata(out_dir, args.partition) or {}).get("root")
+    n_files, n_rows = merge_csvs(out_dir, merge_out, canonical_root=canonical_root)
     print(f"Merged {n_files} shard CSVs ({n_rows} rows) -> {merge_out}")
+    if canonical_root:
+        print(f"Paths normalised under: {canonical_root}")
     return 0
 
 
@@ -1389,7 +1482,7 @@ def run(args):
     if not plan:
         LOG.info("Nothing to do; all shards in this partition already have CSVs")
         if do_merge:
-            n_files, n_rows = merge_csvs(out_dir, merge_out)
+            n_files, n_rows = merge_csvs(out_dir, merge_out, canonical_root=root)
             LOG.info("Master rebuilt: %d shards, %d rows -> %s", n_files, n_rows, merge_out)
         report(None, "finished")
         return 0
@@ -1493,7 +1586,7 @@ def run(args):
         )
         report(shard_label, "running")
         if do_merge and (time.monotonic() - last_merge) >= args.merge_every:
-            n_files, n_rows = merge_csvs(out_dir, merge_out)
+            n_files, n_rows = merge_csvs(out_dir, merge_out, canonical_root=root)
             LOG.info(
                 "Master refreshed: %d shards, %d rows -> %s",
                 n_files, n_rows, os.path.basename(merge_out),
@@ -1501,7 +1594,7 @@ def run(args):
             last_merge = time.monotonic()
 
     if do_merge:
-        n_files, n_rows = merge_csvs(out_dir, merge_out)
+        n_files, n_rows = merge_csvs(out_dir, merge_out, canonical_root=root)
         LOG.info(
             "Master (final this session): %d shards, %d rows -> %s",
             n_files, n_rows, merge_out,

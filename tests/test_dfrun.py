@@ -373,7 +373,9 @@ def test_write_wildlife_and_summary(tmp_path):
 
     with open(desktop / dfrun.DESKTOP_WILDLIFE, newline="", encoding="utf-8") as handle:
         wildlife = list(csv.reader(handle))
-    assert wildlife[0] == dfrun.dfb.CSV_HEADER + ["station"]
+    assert wildlife[0] == (
+        dfrun.dfb.CSV_HEADER + [dfrun.dfb.SEQUENCE_ID_COLUMN, "station"]
+    )
     labels = {row[3] for row in wildlife[1:]}
     assert labels == {"wolf", "lynx"}
 
@@ -409,7 +411,7 @@ def test_ensure_desktop_master_regenerates(tmp_path, monkeypatch):
     assert os.path.exists(master)
     with open(master, newline="", encoding="utf-8") as handle:
         rows = list(csv.reader(handle))
-    assert rows[0] == dfrun.dfb.CSV_HEADER
+    assert rows[0] == dfrun.dfb.CSV_HEADER + [dfrun.dfb.SEQUENCE_ID_COLUMN]
     assert any(r[3] == "wolf" for r in rows[1:])
 
 
@@ -585,3 +587,61 @@ def test_render_service_unit():
     assert "run_metadata.p0.json" in script            # root follows the current run
     assert "'/media/rim/My Book1'" in script           # install-time fallback
     assert script.startswith("#!/bin/bash")
+
+
+# ---------------------------------------------------------------------------
+# reusing a partially complete run's settings
+# ---------------------------------------------------------------------------
+def test_explicit_cli_settings():
+    given = dfrun.explicit_cli_settings(
+        ["--threads", "3", "--no-birds", "--exclude-classes=wolf,lynx", "--yes"]
+    )
+    assert given == {"threads", "birds", "exclude_classes"}
+    assert dfrun.explicit_cli_settings([]) == set()
+    assert dfrun.explicit_cli_settings(None) == set()
+    assert "detector" in dfrun.explicit_cli_settings(["--detector", "MDS"])
+
+
+def test_apply_previous_settings_carries_the_run_forward():
+    # The real incident: a restart fell back to parser defaults and silently
+    # classified the rest of the archive with a different exclusion list.
+    params = {
+        "detector": "DF", "birds": True, "threshold": 0.5, "maxlag": 20,
+        "batch_size": 8, "threads": 4, "merge_every": 600,
+        "exclude_classes": [],
+    }
+    previous = {
+        "detector": "DFbsMDS", "birds": False, "threshold": 0.8, "maxlag": 60,
+        "batch_size": 8, "threads": 3, "merge_every": 600,
+        "excluded_classes": ["genet", "ibex", "porcupine", "reindeer", "wolverine"],
+    }
+    taken = dfrun.apply_previous_settings(params, previous)
+    assert params["detector"] == "DFbsMDS"
+    assert params["threshold"] == 0.8
+    assert params["maxlag"] == 60
+    assert params["birds"] is False
+    assert params["threads"] == 3
+    assert params["exclude_classes"] == ["genet", "ibex", "porcupine", "reindeer", "wolverine"]
+    assert set(taken) == {"detector", "threshold", "maxlag", "birds", "threads",
+                          "exclude_classes"}
+
+
+def test_apply_previous_settings_respects_explicit_flags():
+    params = {"detector": "DF", "birds": True, "threshold": 0.5, "maxlag": 20,
+              "batch_size": 8, "threads": 2, "merge_every": 600,
+              "exclude_classes": ["wolf"]}
+    previous = {"detector": "DFbsMDS", "threshold": 0.8, "threads": 3,
+                "excluded_classes": ["ibex"]}
+    taken = dfrun.apply_previous_settings(
+        params, previous, explicit={"threads", "exclude_classes"}
+    )
+    assert params["detector"] == "DFbsMDS"   # not given: resumed
+    assert params["threads"] == 2            # given on the command line: kept
+    assert params["exclude_classes"] == ["wolf"]
+    assert "threads" not in taken and "exclude_classes" not in taken
+
+
+def test_apply_previous_settings_without_previous_run():
+    params = {"detector": "DF", "threads": 4, "exclude_classes": []}
+    assert dfrun.apply_previous_settings(params, None) == []
+    assert params["detector"] == "DF"

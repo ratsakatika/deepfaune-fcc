@@ -43,7 +43,7 @@ TOOL_NAME = "dfrun"
 # for medium features, first for complete overhauls. See CLAUDE.md
 # ("Versioning") - the self-updater shows this to users, so a stale number
 # makes different code report the same version.
-TOOL_VERSION = "1.4.0"
+TOOL_VERSION = "1.5.0"
 GITHUB_URL = "https://github.com/ratsakatika/deepfaune-fcc"
 # Single configurable contact string, as required.
 CONTACT = (
@@ -848,12 +848,26 @@ def copy_file(src, dst):
         return False
 
 
-def write_wildlife_and_summary(out_dir, desktop_dir):
+def recorded_archive_root(out_dir):
+    """The archive root the current run recorded, or None.
+
+    Used as the canonical root for path normalisation, so outputs rebuilt at
+    any time agree with wherever the run itself read the drive.
+    """
+    meta = load_json(os.path.join(out_dir, "run_metadata.p0.json")) or {}
+    return meta.get("root")
+
+
+def write_wildlife_and_summary(out_dir, desktop_dir, canonical_root=None):
     """Write the spreadsheet-friendly wildlife and summary CSVs to the Desktop.
 
     Reads the shard CSVs (the source of truth) once. The wildlife file holds
     only actual animals (excludes empty, human and vehicle) and is capped at
     Excel's row limit. The summary file holds per-species and per-station counts.
+    Rows carry the same derived columns as the master CSV: a globally unique
+    sequence_id (seqnum alone restarts in every folder) and, when
+    canonical_root is given, image paths re-rooted so a drive mounted under a
+    different name still yields one consistent set of paths.
     Returns (wildlife_rows, capped, species_count, station_count).
     """
     os.makedirs(desktop_dir, exist_ok=True)
@@ -866,6 +880,8 @@ def write_wildlife_and_summary(out_dir, desktop_dir):
     # Union of the shard headers, so per-class score columns (and any columns
     # from older shards) all appear; missing cells are left blank per row.
     header = dfb.shard_header_union(out_dir)
+    if dfb.SEQUENCE_ID_COLUMN not in header:
+        header = header + [dfb.SEQUENCE_ID_COLUMN]
     with open(tmp, "w", newline="", encoding="utf-8") as out:
         writer = csv.writer(out)
         writer.writerow(header + ["station"])
@@ -876,12 +892,28 @@ def write_wildlife_and_summary(out_dir, desktop_dir):
                 continue
             with handle:
                 reader = csv.DictReader(handle)
+                shard_hash = dfb.shard_hash_from_name(path)
+                rel = None  # resolved from the first row of this shard
+                resolved = False
                 for row in reader:
+                    if not resolved:
+                        resolved = True
+                        if canonical_root:
+                            rel = dfb.shard_relpath_from_row(
+                                path, os.path.dirname(row.get("filename") or "")
+                            )
+                    filename = row.get("filename", "")
+                    if rel is not None:
+                        filename = dfb.rerooted_path(filename, canonical_root, rel)
+                        row["filename"] = filename
+                    row[dfb.SEQUENCE_ID_COLUMN] = dfb.sequence_id(
+                        shard_hash, row.get("seqnum", "")
+                    )
                     label = (row.get("prediction_seq") or "").strip()
                     low = label.lower()
                     if low in {"empty", "human", "vehicle"} or not label:
                         continue
-                    station = station_from_path(row.get("filename", ""))
+                    station = station_from_path(filename)
                     species[label] += 1
                     stations[station] += 1
                     if written < EXCEL_ROW_LIMIT - 1:
@@ -932,7 +964,7 @@ def ensure_desktop_master(out_dir):
         src = os.path.join(out_dir, MASTER_NAME)
         try:
             if not os.path.exists(src):
-                dfb.merge_csvs(out_dir, src)
+                dfb.merge_csvs(out_dir, src, canonical_root=recorded_archive_root(out_dir))
             copy_file(src, desktop_master)
         except OSError:
             return None
@@ -1442,6 +1474,71 @@ def parse_pos_int(reply):
     return (value, True) if value >= 1 else (None, False)
 
 
+# Command-line options that override a resumed run's recorded settings. Used
+# to tell "the user asked for this value" apart from "this is the parser
+# default", so resuming never silently changes how a run is classified.
+SETTING_FLAGS = {
+    "detector": ("--detector",),
+    "threshold": ("--threshold",),
+    "maxlag": ("--maxlag",),
+    "batch_size": ("--batch-size",),
+    "threads": ("--threads",),
+    "merge_every": ("--merge-every",),
+    "birds": ("--birds", "--no-birds"),
+    "exclude_classes": ("--exclude-classes",),
+}
+
+
+def explicit_cli_settings(argv, flags=SETTING_FLAGS):
+    """Names of settings the user gave explicitly on the command line."""
+    argv = list(argv or [])
+    given = set()
+    for name, options in flags.items():
+        for option in options:
+            if any(arg == option or arg.startswith(option + "=") for arg in argv):
+                given.add(name)
+                break
+    return given
+
+
+# Metadata field -> params key, for settings a resume should carry forward.
+RESUMED_SETTINGS = {
+    "detector": "detector",
+    "threshold": "threshold",
+    "maxlag": "maxlag",
+    "birds": "birds",
+    "batch_size": "batch_size",
+    "threads": "threads",
+    "merge_every": "merge_every",
+}
+
+
+def apply_previous_settings(params, previous, explicit=()):
+    """Overlay a partially complete run's settings onto params.
+
+    A run in progress owns its settings: continuing it must not silently
+    reclassify the remainder with different ones (the drift that produced a
+    mixed exclusion list mid-archive). Anything named explicitly on the
+    command line still wins. Returns the list of settings taken from the
+    previous run, for reporting.
+    """
+    if not previous:
+        return []
+    taken = []
+    for field, key in RESUMED_SETTINGS.items():
+        if key in explicit or field not in previous or previous[field] is None:
+            continue
+        if params.get(key) != previous[field]:
+            params[key] = previous[field]
+            taken.append(key)
+    if "exclude_classes" not in explicit and previous.get("excluded_classes") is not None:
+        recorded = list(previous["excluded_classes"])
+        if sorted(recorded) != sorted(params.get("exclude_classes") or []):
+            params["exclude_classes"] = recorded
+            taken.append("exclude_classes")
+    return taken
+
+
 def parse_exclusion_numbers(reply, n):
     """Parse '3, 7,12' into unique sorted 1-based menu numbers within [1, n].
 
@@ -1543,8 +1640,14 @@ def _print_params(params):
     print(f"  {'exclude':12s} {', '.join(excluded) if excluded else 'none'}")
 
 
-def stage_configure(args, out_dir):
-    """Stage 4: show parameters and let the user confirm or change them."""
+def stage_configure(args, out_dir, argv=None, source=None):
+    """Stage 4: show parameters and let the user confirm or change them.
+
+    When the out-dir already holds a partially complete run, that run's own
+    settings become the suggested values, so continuing it cannot silently
+    reclassify the remainder differently. Anything given explicitly on the
+    command line still wins, and the prompts can still change anything.
+    """
     params = {
         "detector": args.detector,
         "birds": args.birds,
@@ -1556,25 +1659,32 @@ def stage_configure(args, out_dir):
         # Validated in main(); a parse failure never reaches this point.
         "exclude_classes": dfb.parse_excluded_classes(args.exclude_classes)[0] or [],
     }
-    # Warn if a previous run used different threshold/maxlag (mixed dataset).
-    previous = read_status(out_dir) or load_json(
-        os.path.join(out_dir, "run_metadata.p0.json")
-    )
+    # Any recorded run in this out-dir owns its settings: continuing it (or
+    # adding new photographs to it later) must classify consistently with the
+    # shards already written. No line counting here - assess_work has already
+    # walked the shard CSVs and this only needs to know a run exists.
+    previous = load_json(os.path.join(out_dir, "run_metadata.p0.json"))
     if previous:
-        prev_t = previous.get("threshold")
-        prev_l = previous.get("maxlag")
-        if prev_t is not None and (prev_t != params["threshold"] or prev_l != params["maxlag"]):
+        explicit = explicit_cli_settings(
+            sys.argv[1:] if argv is None else argv
+        )
+        taken = apply_previous_settings(params, previous, explicit)
+        started = str(previous.get("utc_start_time") or "")[:16].replace("T", " ")
+        print(
+            f"Continuing the run already in this folder (started {started} UTC); "
+            "its settings are the suggested values below."
+        )
+        if taken:
+            print("  Reusing from that run: " + ", ".join(sorted(taken)))
+        if explicit:
+            print("  Overridden on the command line: " + ", ".join(sorted(explicit)))
+        prev_root = previous.get("root")
+        if source and prev_root and os.path.abspath(prev_root) != os.path.abspath(source):
             print(
-                f"NOTE: a previous run used threshold {prev_t} / maxlag {prev_l}; "
-                f"this run uses {params['threshold']} / {params['maxlag']}. "
-                "Completed shards keep their old values (mixed dataset)."
-            )
-        prev_x = previous.get("excluded_classes")
-        if prev_x is not None and sorted(prev_x) != sorted(params["exclude_classes"]):
-            print(
-                f"NOTE: a previous run excluded [{', '.join(prev_x) or 'none'}]; "
-                f"this run excludes [{', '.join(params['exclude_classes']) or 'none'}]. "
-                "Completed shards keep their old exclusions (mixed dataset)."
+                f"NOTE: that run read the archive at {prev_root}; it is now at "
+                f"{source}. The drive has been mounted under a different name. "
+                "Image paths are normalised to the current mount when the "
+                "master CSV is rebuilt, so the outputs stay consistent."
             )
     print("Run parameters:")
     _print_params(params)
@@ -1949,7 +2059,7 @@ def main(argv=None):
     source, uuid = found
 
     stage_assess(out_dir, source, uuid, args.rescan)
-    params = stage_configure(args, out_dir)
+    params = stage_configure(args, out_dir, argv=argv, source=source)
     if params is None:
         return 1
     stage_swap(args)
@@ -2015,9 +2125,11 @@ def finish_outputs(out_dir, software_dir):
     print("Writing the spreadsheet-friendly outputs to the Desktop...")
     master = os.path.join(out_dir, MASTER_NAME)
     if not os.path.exists(master):
-        dfb.merge_csvs(out_dir, master)
+        dfb.merge_csvs(out_dir, master, canonical_root=recorded_archive_root(out_dir))
     copy_file(master, os.path.join(DESKTOP_DIR, DESKTOP_MASTER))
-    rows, capped, n_species, n_stations = write_wildlife_and_summary(out_dir, DESKTOP_DIR)
+    rows, capped, n_species, n_stations = write_wildlife_and_summary(
+        out_dir, DESKTOP_DIR, canonical_root=recorded_archive_root(out_dir)
+    )
     print(f"  {DESKTOP_MASTER}: every image (too large for Excel; open in R)")
     print(f"  {DESKTOP_WILDLIFE}: {rows:,} wildlife rows" + (" (capped to Excel's limit)" if capped else ""))
     print(f"  {DESKTOP_SUMMARY}: {n_species} species, {n_stations} stations")

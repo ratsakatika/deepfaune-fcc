@@ -237,7 +237,7 @@ tr.photorow td{background:var(--night2);white-space:normal}
 <section class="section off" id="p-filter">
   <div class="section-head"><span class="n">02</span><h2>Filters</h2>
     <span class="hint" id="candcount"></span></div>
-  <p class="lead">An <b>event</b> is one camera visit: consecutive photographs at the same
+  <p class="lead">An <b>event</b> is a sequence of images: consecutive photographs at the same
   camera, chained together while each is within the sequence gap of the previous one.
   Everything on this page counts events, and predictions are re-derived from the stored
   scores, so every setting here applies retrospectively without reclassifying anything.</p>
@@ -460,8 +460,8 @@ tr.photorow td{background:var(--night2);white-space:normal}
 
 <footer>
 <h3>Notes &amp; method</h3>
-<p><b>Unit of analysis.</b> An event is one camera visit: consecutive photographs at the same
-camera chained by the sequence gap. A burst of frames counts once, since burst frames are not
+<p><b>Unit of analysis.</b> An event is a sequence of images: consecutive photographs at the
+same camera chained by the sequence gap. A burst of frames counts once, since burst frames are not
 independent records of separate visits. Events are identified by <i>sequence_id</i>; if the CSV
 predates that column, the folder path and seqnum are used instead.</p>
 <p><b>Filtering.</b> Every panel reflects the current filters: predictions are re-derived from the
@@ -547,7 +547,7 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
         <li><b>Events filtered out</b> - everything the current filters removed, with the
           reasons listed under the figure: outside the chosen scope, recycle-bin files,
           excluded categories (empty / human / vehicle / below-threshold).</li>
-        <li>An <b>event</b> is one camera visit (a chained run of photographs), so a burst of
+        <li>An <b>event</b> is a sequence of images (photographs chained by the sequence gap), so a burst of
           frames counts once. <code>sequence_id</code> identifies an event uniquely: a short
           code for the camera folder plus the sequence number, because the plain sequence
           number restarts at 1 in every folder.</li>

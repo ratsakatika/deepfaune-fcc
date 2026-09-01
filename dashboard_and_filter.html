@@ -578,9 +578,10 @@ Leaflet from public CDNs; everything except the seasonal chart and the map backg
           column names (<code>prediction_seq</code>, <code>top1_seq</code>, <code>score_seq</code>,
           <code>above_threshold</code>...) plus second and third choices and event extras.</li>
         <li><b>Download images CSV</b> - re-reads the master and writes only the rows of
-          surviving events, with the master's columns plus <code>top2_seq</code>/<code>top3_seq</code>
-          and their scores beside <code>top1_seq</code>; the sequence-level verdict columns are
-          refreshed to match the current filters.</li>
+          surviving events, with the master's columns plus each image's own second and third
+          best species (<code>top2_image</code>/<code>top3_image</code> with scores, beside
+          <code>score_image</code>); the sequence-level verdict columns are refreshed to match
+          the current filters.</li>
         <li><b>Save species summary</b> - species, group, events, images and mean confidence.</li>
         <li>Each figure saves as an image (PNG, and SVG for the rhythm ring).</li>
       </ul>
@@ -2119,19 +2120,26 @@ async function downloadImagesCsv() {
   let header = null, col = {}, seqCol = -1, wrote = 0;
   const t0 = performance.now();
   const grouper = S.loadedGap != null ? makeGrouper(S.loadedGap) : null;
-  /* top2/top3 columns are spliced in right after score_seq (blank on empty,
-     human and vehicle rows), so every row keeps the same column count. */
-  let insertAt = -1;
+  /* Per-image top2/top3 columns are spliced in right after score_image: the
+     row's own second and third best species from its stored score_* columns,
+     matching the per-image top1_image (blank when the image held no animal),
+     so every row keeps the same column count. */
+  let imgInsertAt = -1, imgScoreIdx = [], imgClasses = [];
   const handleLine = (line) => {
     if (first) {
       first = false;
       header = splitCsv(line).map((h) => h.trim());
       header.forEach((h, j) => { col[h] = j; });
       seqCol = col.sequence_id != null ? col.sequence_id : -1;
-      if (col.score_seq != null) {
-        insertAt = col.score_seq + 1;
+      header.forEach((h, j) => {
+        if (h.startsWith("score_") && h !== "score_seq" && h !== "score_image") {
+          imgScoreIdx.push(j); imgClasses.push(h.slice(6).replace(/_/g, " "));
+        }
+      });
+      if (col.score_image != null && imgScoreIdx.length) {
+        imgInsertAt = col.score_image + 1;
         const h2 = header.slice();
-        h2.splice(insertAt, 0, "top2_seq", "top2_score", "top3_seq", "top3_score");
+        h2.splice(imgInsertAt, 0, "top2_image", "score2_image", "top3_image", "score3_image");
         buf += h2.join(",") + "\n";
       } else {
         buf += line + "\n";
@@ -2154,13 +2162,21 @@ async function downloadImagesCsv() {
       if (col.score_seq != null) p2[col.score_seq] = r.score.toFixed(4);
       if (col.above_threshold != null) p2[col.above_threshold] = r.kind === "animal" ? "yes" : "no";
     }
-    if (insertAt >= 0) {
-      if (animal) {
-        p2.splice(insertAt, 0, r.second || "", r.second ? r.secondScore.toFixed(4) : "",
-          r.third || "", r.third ? r.thirdScore.toFixed(4) : "");
-      } else {
-        p2.splice(insertAt, 0, "", "", "", "");
+    if (imgInsertAt >= 0) {
+      let t2 = "", s2 = "", t3 = "", s3 = "";
+      if (p2[imgScoreIdx[0]] !== "" && p2[imgScoreIdx[0]] !== undefined) {
+        /* this image held an animal: rank its own per-class scores */
+        let b1 = -1, v1 = -Infinity, b2 = -1, v2 = -Infinity, b3 = -1, v3 = -Infinity;
+        for (let j = 0; j < imgScoreIdx.length; j++) {
+          const v = +p2[imgScoreIdx[j]];
+          if (v > v1) { b3 = b2; v3 = v2; b2 = b1; v2 = v1; b1 = j; v1 = v; }
+          else if (v > v2) { b3 = b2; v3 = v2; b2 = j; v2 = v; }
+          else if (v > v3) { b3 = j; v3 = v; }
+        }
+        if (b2 >= 0) { t2 = imgClasses[b2]; s2 = v2.toFixed(4); }
+        if (b3 >= 0) { t3 = imgClasses[b3]; s3 = v3.toFixed(4); }
       }
+      p2.splice(imgInsertAt, 0, t2, s2, t3, s3);
       buf += p2.map(csvCell).join(",") + "\n";
     } else {
       buf += (animal ? p2.map(csvCell).join(",") : line) + "\n";

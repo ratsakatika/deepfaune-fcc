@@ -736,18 +736,37 @@ const S = {
    previous one. Rows in the master are folder-contiguous and date-ordered
    (the engine writes them that way), so one pass suffices. An undated photo
    cannot chain and becomes its own event. */
-function makeGrouper(gap) {
-  let lastDir = null, lastT = NaN, count = 0;
-  return (fn, d) => {
-    const dir = fn.slice(0, fn.lastIndexOf("/"));
-    const t = d ? d.getTime() : NaN;
-    if (dir !== lastDir || !isFinite(t) || !isFinite(lastT) ||
-        t - lastT > gap * 1000 || t < lastT) {
-      count++;
-    }
-    lastDir = dir; lastT = t;
-    return gap + "s-" + count;
-  };
+/* Naive (timezone-free) parse of an EXIF timestamp for grouping, exactly
+   like the engine's strptime: strict format, or NaN. */
+function parseNaive(sd) {
+  if (!sd || !/^\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}$/.test(sd)) return NaN;
+  return Date.UTC(+sd.slice(0, 4), +sd.slice(5, 7) - 1, +sd.slice(8, 10),
+    +sd.slice(11, 13), +sd.slice(14, 16), +sd.slice(17, 19));
+}
+
+/* Group one directory's rows exactly like the engine's findSequences: sort
+   the dated rows chronologically and chain while each is within `gap`
+   seconds of the previous; a row whose date does not parse (the engine
+   writes "NA") always breaks the chain on both sides, so it is a singleton
+   wherever it sorts. Returns one key per row, in the rows' original order.
+   Chaining in file order instead of date order was wrong: the engine sorts
+   first, so a date inversion inside a burst must not split it. */
+function groupDirRows(dates, gap, state) {
+  const keys = new Array(dates.length);
+  const dated = [];
+  for (let i = 0; i < dates.length; i++) {
+    const t = parseNaive(dates[i]);
+    if (isNaN(t)) keys[i] = gap + "s-" + (++state.counter);
+    else dated.push([t, i]);
+  }
+  dated.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let prev = NaN;
+  for (const [t, i] of dated) {
+    if (!(t - prev <= gap * 1000)) state.counter++;
+    keys[i] = gap + "s-" + state.counter;
+    prev = t;
+  }
+  return keys;
 }
 let SCOPE = "survey";
 
@@ -816,7 +835,10 @@ async function tryAutoLoad() {
 
 async function loadFrom(reader, totalBytes, label, src, gap) {
   const prevClasses = S.classes.join("|");
-  const grouper = gap != null ? makeGrouper(gap) : null;
+  /* Regrouping buffers one directory at a time (directory rows are
+     contiguous in the master: one shard per folder), sorts it by date and
+     assigns engine-faithful keys, then accumulates the buffered rows. */
+  const G = gap != null ? { gap, dir: null, lines: [], dates: [], counter: 0 } : null;
   $("filemeta").hidden = false;
   $("filemeta").textContent = label + (totalBytes ? " · " + humanBytes(totalBytes) : "") +
     (gap != null ? " · regrouped at " + gap + " s" : "");
@@ -855,14 +877,7 @@ async function loadFrom(reader, totalBytes, label, src, gap) {
     grow(4096);
   };
 
-  const handleRow = (line) => {
-    const p = splitCsv(line);
-    if (p.length < header.length - 2) return;
-    const fn = p[col.filename] || "";
-    const d0 = grouper ? parseExif(p[col.date]) : null;
-    const key = grouper ? grouper(fn, d0)
-      : (seqCol >= 0 && p[seqCol] ? p[seqCol]
-        : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p[col.seqnum] || ""));
+  const accumulateRow = (p, fn, key) => {
     let i = S.map.get(key);
     if (i === undefined) {
       i = S.n++;
@@ -898,6 +913,32 @@ async function loadFrom(reader, totalBytes, label, src, gap) {
     }
   };
 
+  const flushDir = () => {
+    if (!G || !G.lines.length) return;
+    const keys = groupDirRows(G.dates, G.gap, G);
+    for (let n = 0; n < G.lines.length; n++) {
+      const p = splitCsv(G.lines[n]);
+      accumulateRow(p, p[col.filename] || "", keys[n]);
+    }
+    G.lines = []; G.dates = [];
+  };
+
+  const handleRow = (line) => {
+    const p = splitCsv(line);
+    if (p.length < header.length - 2) return;
+    const fn = p[col.filename] || "";
+    if (G) {
+      const dir = fn.slice(0, fn.lastIndexOf("/"));
+      if (dir !== G.dir) { flushDir(); G.dir = dir; }
+      G.lines.push(line);
+      G.dates.push(p[col.date] || "");
+      return;
+    }
+    const key = seqCol >= 0 && p[seqCol] ? p[seqCol]
+      : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p[col.seqnum] || "");
+    accumulateRow(p, fn, key);
+  };
+
   let first = true;
   for (;;) {
     const { done, value } = await reader.read();
@@ -925,6 +966,7 @@ async function loadFrom(reader, totalBytes, label, src, gap) {
     }
   }
   if (remainder.trim()) { if (first) handleHeader(remainder); else handleRow(remainder); }
+  flushDir();
 
   setBar("loadbar", 100);
   $("loadmsg").textContent = fmt(S.rows) + " images · " + fmt(S.n) + " events · " + S.K + " species columns";
@@ -2119,39 +2161,16 @@ async function downloadImagesCsv() {
   let buf = "", remainder = "", read = 0, first = true;
   let header = null, col = {}, seqCol = -1, wrote = 0;
   const t0 = performance.now();
-  const grouper = S.loadedGap != null ? makeGrouper(S.loadedGap) : null;
+  /* Regrouping must assign the same keys the loader did: buffer each
+     directory, compute keys with the same engine-faithful sort-and-chain,
+     then write the rows in their original order. */
+  const G = S.loadedGap != null ? { gap: S.loadedGap, dir: null, lines: [], dates: [], counter: 0 } : null;
   /* Per-image top2/top3 columns are spliced in right after score_image: the
      row's own second and third best species from its stored score_* columns,
      matching the per-image top1_image (blank when the image held no animal),
      so every row keeps the same column count. */
   let imgInsertAt = -1, imgScoreIdx = [], imgClasses = [];
-  const handleLine = (line) => {
-    if (first) {
-      first = false;
-      header = splitCsv(line).map((h) => h.trim());
-      header.forEach((h, j) => { col[h] = j; });
-      seqCol = col.sequence_id != null ? col.sequence_id : -1;
-      header.forEach((h, j) => {
-        if (h.startsWith("score_") && h !== "score_seq" && h !== "score_image") {
-          imgScoreIdx.push(j); imgClasses.push(h.slice(6).replace(/_/g, " "));
-        }
-      });
-      if (col.score_image != null && imgScoreIdx.length) {
-        imgInsertAt = col.score_image + 1;
-        const h2 = header.slice();
-        h2.splice(imgInsertAt, 0, "top2_image", "score2_image", "top3_image", "score3_image");
-        buf += h2.join(",") + "\n";
-      } else {
-        buf += line + "\n";
-      }
-      return;
-    }
-    const p2 = splitCsv(line);
-    if (p2.length < header.length - 2) return;
-    const fn = p2[col.filename] || "";
-    const key = grouper ? grouper(fn, parseExif(p2[col.date]))
-      : (seqCol >= 0 && p2[seqCol] ? p2[seqCol]
-        : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p2[col.seqnum] || ""));
+  const processRow = (p2, key) => {
     const i = S.map.get(key);
     const r = i !== undefined ? kept[i] : undefined;
     if (!r) return;
@@ -2184,6 +2203,47 @@ async function downloadImagesCsv() {
     wrote++;
     if (buf.length > 1 << 20) { parts.push(buf); buf = ""; }
   };
+  const flushDir = () => {
+    if (!G || !G.lines.length) return;
+    const keys = groupDirRows(G.dates, G.gap, G);
+    for (let n = 0; n < G.lines.length; n++) processRow(splitCsv(G.lines[n]), keys[n]);
+    G.lines = []; G.dates = [];
+  };
+  const handleLine = (line) => {
+    if (first) {
+      first = false;
+      header = splitCsv(line).map((h) => h.trim());
+      header.forEach((h, j) => { col[h] = j; });
+      seqCol = col.sequence_id != null ? col.sequence_id : -1;
+      header.forEach((h, j) => {
+        if (h.startsWith("score_") && h !== "score_seq" && h !== "score_image") {
+          imgScoreIdx.push(j); imgClasses.push(h.slice(6).replace(/_/g, " "));
+        }
+      });
+      if (col.score_image != null && imgScoreIdx.length) {
+        imgInsertAt = col.score_image + 1;
+        const h2 = header.slice();
+        h2.splice(imgInsertAt, 0, "top2_image", "score2_image", "top3_image", "score3_image");
+        buf += h2.join(",") + "\n";
+      } else {
+        buf += line + "\n";
+      }
+      return;
+    }
+    const p2 = splitCsv(line);
+    if (p2.length < header.length - 2) return;
+    const fn = p2[col.filename] || "";
+    if (G) {
+      const dir = fn.slice(0, fn.lastIndexOf("/"));
+      if (dir !== G.dir) { flushDir(); G.dir = dir; }
+      G.lines.push(line);
+      G.dates.push(p2[col.date] || "");
+      return;
+    }
+    const key = seqCol >= 0 && p2[seqCol] ? p2[seqCol]
+      : fn.slice(0, fn.lastIndexOf("/")) + "|" + (p2[col.seqnum] || "");
+    processRow(p2, key);
+  };
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -2200,6 +2260,7 @@ async function downloadImagesCsv() {
     await new Promise((res) => setTimeout(res, 0));
   }
   if (remainder.trim()) handleLine(remainder.endsWith("\r") ? remainder.slice(0, -1) : remainder);
+  flushDir();
   if (buf) parts.push(buf);
   setBar("genbar", 100);
   $("genmsg").textContent = fmt(wrote) + " image rows";

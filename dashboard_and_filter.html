@@ -210,7 +210,7 @@ tr.photorow td{background:var(--night2);white-space:normal}
   <div class="eyebrow"><span class="pdot"></span>Wildlife camera-trap survey &middot; F&#259;g&#259;ra&#537; Mountains, Romania &middot; <span id="th_years">&mdash;</span></div>
   <button class="mini" id="helpbtn" style="margin-left:auto">Help</button>
 </div>
-<h1><span id="th_stn">&mdash;</span> cameras across the<br><span class="em">F&#259;g&#259;ra&#537; Mountains</span>.</h1>
+<h1>Camera-trap monitoring in the<br><span class="em">F&#259;g&#259;ra&#537; Mountains</span></h1>
 
 <!-- ================= 01 LOAD ================= -->
 <section class="section" id="p-load">
@@ -1003,7 +1003,9 @@ const ROMANIA_ABSENT = ["fallow deer", "genet", "ibex", "moose", "mouflon", "mus
 function buildSpeciesTable() {
   const tb = $("sptbody");
   tb.innerHTML = "";
-  S.classes.forEach((name, j) => {
+  const ordered = S.classes.map((name, j) => [name, j])
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  ordered.forEach(([name, j]) => {
     const tr = document.createElement("tr");
     tr.innerHTML =
       '<td><input type="checkbox" class="sp-on" data-j="' + j + '" checked aria-label="Include ' + esc(name) + '"></td>' +
@@ -1483,7 +1485,6 @@ function renderScalars() {
   const years = d0 && d1 ? (d0.getFullYear() === d1.getFullYear()
     ? String(d0.getFullYear()) : d0.getFullYear() + "–" + d1.getFullYear()) : "—";
   const nAnimalTypes = SPECIES.length;
-  $("th_stn").textContent = stn;
   $("th_years").textContent = years;
   const B = (v) => "<b>" + v + "</b>";
   const plural = (n, one, many) => fmt(n) + " " + (n === 1 ? one : many);

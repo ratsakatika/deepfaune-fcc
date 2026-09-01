@@ -154,6 +154,9 @@ tr.sp-off td{opacity:.42}
 .tablewrap .filterrow th{top:30px;text-transform:none;letter-spacing:0}
 .tablewrap td{padding:5px 10px;border-top:1px solid var(--line);white-space:nowrap}
 .tablewrap th.num,.tablewrap td.num{text-align:right;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+.tablewrap th.sortable{cursor:pointer;user-select:none}
+.tablewrap th.sortable:hover{color:var(--mist)}
+.tablewrap th .sarr{color:var(--sodium)}
 .pill{padding:1px 8px;border-radius:6px;font-size:11.5px;font-family:'IBM Plex Mono',monospace;white-space:nowrap}
 .pill.animal{color:var(--sodium);background:rgba(240,168,57,.12)}
 .pill.below{color:#ff8477;background:rgba(208,59,59,.16)}
@@ -357,9 +360,14 @@ tr.photorow td{background:var(--night2);white-space:normal}
   </div>
   <div class="tablewrap">
     <table><thead><tr>
-      <th>Top 1</th><th class="num">Score</th><th class="num">Top 2</th>
-      <th class="num">Top 3</th><th class="num">Images</th>
-      <th class="num">Length</th><th>Station</th><th>Date</th>
+      <th class="sortable" data-s="sp">Top 1<span class="sarr"></span></th>
+      <th class="num sortable" data-s="score">Score<span class="sarr"></span></th>
+      <th class="num sortable" data-s="t2">Top 2<span class="sarr"></span></th>
+      <th class="num sortable" data-s="t3">Top 3<span class="sarr"></span></th>
+      <th class="num sortable" data-s="img">Images<span class="sarr"></span></th>
+      <th class="num sortable" data-s="len">Length<span class="sarr"></span></th>
+      <th class="sortable" data-s="st">Station<span class="sarr"></span></th>
+      <th class="sortable" data-s="date">Date<span class="sarr"></span></th>
     </tr><tr class="filterrow">
       <th><input data-f="sp" placeholder="filter" aria-label="Filter top 1"></th>
       <th><input data-f="score" placeholder="min" inputmode="decimal" aria-label="Minimum score"></th>
@@ -1934,7 +1942,22 @@ function renderAll() {
 /* Table view state: page, rows per page, and per-column filters. Filters
    apply to the table view only; the CSV downloads always carry the full
    generated results. */
-var TBL = { size: 50, page: 0, filters: { sp: "", score: "", t2: "", t3: "", img: "", len: "", st: "", date: "" }, idx: null };
+var TBL = { size: 50, page: 0, filters: { sp: "", score: "", t2: "", t3: "", img: "", len: "", st: "", date: "" }, sort: null, idx: null };
+/* Sort keys per column: how to read the value for an event (i = first row
+   index, r = its result), whether it is numeric, and which direction a
+   first click uses (numeric columns start with the largest on top; text
+   and date columns start ascending, matching the default oldest-first). */
+var SORTKEYS = {
+  sp:    { num: false, d0: 1,  get: (i, r) => ((r.top1 || r.label) || "").toLowerCase() },
+  score: { num: true,  d0: -1, get: (i, r) => r.score },
+  t2:    { num: false, d0: 1,  get: (i, r) => (r.second || "").toLowerCase() },
+  t3:    { num: false, d0: 1,  get: (i, r) => (r.third || "").toLowerCase() },
+  img:   { num: true,  d0: -1, get: (i, r) => evImgs(i, r) },
+  len:   { num: true,  d0: -1, get: (i, r) => evSecs(i, r) },
+  st:    { num: false, d0: 1,  get: (i, r) => S.station[i].toLowerCase() },
+  date:  { num: true,  d0: 1,  get: (i, r) => evT0(i, r) }
+};
+var SORTNAMES = { sp: "top 1", score: "score", t2: "top 2", t3: "top 3", img: "images", len: "length", st: "station", date: "date" };
 function eventWhen(i, r) {
   const t = evT0(i, r);
   return isFinite(t) ? new Date(t).toISOString().slice(0, 16).replace("T", " ") : "—";
@@ -1958,6 +1981,23 @@ function tableIndex() {
     if (st && S.station[i].toLowerCase().indexOf(st) === -1) continue;
     if (dt && eventWhen(i, r).toLowerCase().indexOf(dt) === -1) continue;
     out.push(k);
+  }
+  if (TBL.sort && SORTKEYS[TBL.sort.key]) {
+    const sk = SORTKEYS[TBL.sort.key], dir = TBL.sort.dir;
+    /* Precompute the keys, then a stable sort keeps ties oldest-first.
+       Events without a value (no top 2/3, unparseable date) sink to the
+       bottom whichever direction is chosen. */
+    const key = new Map();
+    for (const k of out) key.set(k, sk.get(R.pairs[k * 2], R.pairs[k * 2 + 1]));
+    out.sort((a, b) => {
+      const ka = key.get(a), kb = key.get(b);
+      const ma = sk.num ? !isFinite(ka) : ka === "";
+      const mb = sk.num ? !isFinite(kb) : kb === "";
+      if (ma || mb) return ma && mb ? 0 : (ma ? 1 : -1);
+      if (ka < kb) return -dir;
+      if (ka > kb) return dir;
+      return 0;
+    });
   }
   TBL.idx = out;
   return out;
@@ -2000,10 +2040,14 @@ function renderTable() {
     : "no events match the column filters";
   $("pgprev").disabled = TBL.page === 0;
   $("pgnext").disabled = TBL.page >= pages - 1;
-  $("tablenote").textContent = fmt(R.events) + " events, oldest first." +
+  $("tablenote").textContent = fmt(R.events) + " events, " +
+    (TBL.sort
+      ? "sorted by " + SORTNAMES[TBL.sort.key] + (TBL.sort.dir > 0 ? ", ascending." : ", descending.")
+      : "oldest first.") +
     (tableFiltersActive()
       ? " Column filters match " + fmt(idx.length) + " of them (table only; the CSV downloads keep the full results)."
-      : " Use the boxes under the headings to filter columns; text boxes match anywhere, number boxes are minimums.");
+      : " Click a heading to sort (again to reverse); the boxes beneath filter columns. Text boxes match anywhere, number boxes are minimums.");
+  updateSortArrows();
   probePhotos();
   photoHint();
   const thr = (+$("thrNum").value).toFixed(2);
@@ -2067,6 +2111,21 @@ $("pgsize").addEventListener("change", () => {
 });
 $("pgprev").addEventListener("click", () => { TBL.page--; if (S.results) renderTable(); });
 $("pgnext").addEventListener("click", () => { TBL.page++; if (S.results) renderTable(); });
+function updateSortArrows() {
+  document.querySelectorAll("#sec_events th.sortable").forEach((th) => {
+    const s = th.querySelector(".sarr");
+    if (s) s.textContent = TBL.sort && TBL.sort.key === th.dataset.s
+      ? (TBL.sort.dir > 0 ? " ▲" : " ▼") : "";
+  });
+}
+document.querySelectorAll("#sec_events th.sortable").forEach((th) =>
+  th.addEventListener("click", () => {
+    const key = th.dataset.s;
+    if (TBL.sort && TBL.sort.key === key) TBL.sort = { key, dir: -TBL.sort.dir };
+    else TBL.sort = { key, dir: SORTKEYS[key].d0 };
+    TBL.idx = null; TBL.page = 0;
+    if (S.results) renderTable(); else updateSortArrows();
+  }));
 var _tblTimer = null;
 document.querySelectorAll(".filterrow input").forEach((el) =>
   el.addEventListener("input", () => {
